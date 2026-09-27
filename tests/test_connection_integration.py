@@ -160,4 +160,84 @@ class ModuleConnectionTests(unittest.TestCase):
         self.assertEqual(self.pe._get_cfg()['api_url'], 'http://own/v1')
 
 
+
+    def test_own_api_keys_preserve_clear_and_never_appear_in_config(self):
+        for module in (self.cap, self.pe):
+            response = self.own(module, api_key='own-secret')
+            self.assertEqual(response.status, 200)
+            self.assertNotIn('own-secret', str(response.response))
+            self.assertEqual(module._get_cfg()['api_key'], 'own-secret')
+            self.own(module, model='changed')
+            self.assertEqual(module._get_cfg()['api_key'], 'own-secret')
+            self.own(module, api_url='http://different')
+            self.assertEqual(module._get_cfg()['api_key'], '')
+            self.own(module, api_key='own-secret')
+            self.own(module, api_key='')
+            self.assertEqual(module._get_cfg()['api_key'], '')
+
+    def test_invalid_api_keys_do_not_change_own_connection(self):
+        for module in (self.cap, self.pe):
+            self.own(module, api_key='kept-secret')
+            result = self.own(module, api_key='secret\nInjected:yes')
+            self.assertEqual(result.status, 400)
+            self.assertNotIn('Injected', str(result.response))
+            self.assertEqual(module._get_cfg()['api_key'], 'kept-secret')
+
+    @unittest.skipUnless(AIConnection and hasattr(AIConnection, 'draft'), 'This Core predates central API-key support')
+    def test_shared_keys_override_own_keys_without_destroying_backup(self):
+        self.hub.ai_connection.save({'api_url':'http://shared','api_key':'central-secret','transport':'browser'})
+        for module in (self.cap, self.pe):
+            self.own(module, api_key='own-secret')
+            result = self.call(module, '_save_config', {'connection_mode':'shared'})
+            self.assertEqual(result.status, 200)
+            self.assertNotIn('secret', str(result.response))
+            self.assertEqual(module._get_cfg()['api_key'], 'central-secret')
+            credentials = self.call(module, '_browser_connection', {'saved':True})
+            self.assertEqual(credentials.response['api_key'], 'central-secret')
+            self.own(module)
+            self.assertEqual(module._get_cfg()['api_key'], 'own-secret')
+
+    def test_model_detection_and_browser_credentials_use_matching_key(self):
+        response = Mock()
+        response.json.return_value = {'data':[{'id':'vision'}]}
+        for module in (self.cap, self.pe):
+            self.own(module, api_key='own-secret')
+            with patch('requests.get', return_value=response) as request:
+                result = self.call(module, '_models', {'api_url':'http://own/v1','transport':'hub'})
+                self.assertEqual(result.status, 200)
+                self.assertEqual(request.call_args.kwargs['headers'], {'Authorization':'Bearer own-secret'})
+                self.call(module, '_models', {'api_url':'http://different','transport':'hub'})
+                self.assertEqual(request.call_args.kwargs['headers'], {})
+                self.call(module, '_models', {'api_url':'http://different','api_key':'draft-secret','transport':'hub'})
+                self.assertEqual(request.call_args.kwargs['headers'], {'Authorization':'Bearer draft-secret'})
+            self.assertEqual(module._get_cfg()['api_key'], 'own-secret')
+            self.assertEqual(self.call(module, '_browser_connection', {'saved':True}).status, 400)
+            creds = self.call(module, '_browser_connection', {'api_url':'http://own/v1','transport':'browser'})
+            self.assertEqual(creds.response['api_key'], 'own-secret')
+            creds = self.call(module, '_browser_connection', {'api_url':'http://different','transport':'browser'})
+            self.assertEqual(creds.response['api_key'], '')
+
+    def test_caption_and_stream_include_auth_on_initial_and_retry_requests(self):
+        self.own(self.cap, api_key='caption-secret')
+        failed = Mock(ok=False, text='unsupported top_k')
+        success = Mock(ok=True)
+        success.json.return_value = {'choices':[{'message':{'content':'caption'}}]}
+        with patch('requests.post', side_effect=[failed, success]) as request:
+            result = self.call(self.cap, '_caption', {'image_b64':'test'})
+            self.assertEqual(result.response['caption'], 'caption')
+            self.assertEqual(request.call_count, 2)
+            for call in request.call_args_list:
+                self.assertEqual(call.kwargs['headers'], {'Authorization':'Bearer caption-secret'})
+                self.assertFalse(call.kwargs['allow_redirects'])
+        self.own(self.pe, api_key='prompt-secret')
+        success.__enter__ = Mock(return_value=success)
+        success.__exit__ = Mock(return_value=None)
+        success.iter_lines.return_value = [b'data: [DONE]', b'']
+        with patch('requests.post', return_value=success) as request:
+            result = self.call(self.pe, '_chat', {'messages':[]})
+            self.assertEqual(result.status, 200)
+            self.assertEqual(request.call_args.kwargs['headers'], {'Authorization':'Bearer prompt-secret'})
+            self.assertFalse(request.call_args.kwargs['allow_redirects'])
+
+
 if __name__ == '__main__': unittest.main()

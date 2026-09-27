@@ -25,6 +25,50 @@ import re
 import threading
 from urllib.parse import urlsplit, urlunsplit
 from core import Module
+
+# These small helpers also support installations predating Core AI settings.
+try:
+    from core.ai_connection import api_key_value, auth_headers, public_connection
+except ImportError:
+    def api_key_value(data, previous=None):
+        """Omitted keys survive edits only for the same normalized endpoint."""
+        if "api_key" in data:
+            value = data["api_key"]
+            if not isinstance(value, str) or len(value) > 4096:
+                raise ValueError("Invalid API key.")
+            value = value.strip()
+            if any(ord(c) < 33 or ord(c) > 126 for c in value):
+                raise ValueError("API keys cannot contain spaces or control characters.")
+            return value
+        previous = previous or {}
+        def endpoint(value):
+            value = str(value or "").strip().rstrip("/")
+            if value and "://" not in value:
+                value = "http://" + value
+            if value and not value.lower().endswith("/v1"):
+                value += "/v1"
+            return value
+        if endpoint(data.get("api_url")) == endpoint(previous.get("api_url")):
+            return api_key_value({"api_key": previous.get("api_key", "")})
+        return ""
+
+
+    def auth_headers(connection):
+        key = api_key_value({"api_key": connection.get("api_key", "")})
+        return {"Authorization": "Bearer " + key} if key else {}
+
+
+    def public_connection(value):
+        """Keep credentials out of config responses, including custom/shared backups."""
+        if isinstance(value, list):
+            return [public_connection(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        result = {key: public_connection(item) for key, item in value.items() if key != "api_key"}
+        if "api_key" in value:
+            result["api_key_set"] = bool(value["api_key"])
+        return result
+
 from core.server import build_shell, _font_links
 
 
@@ -223,7 +267,7 @@ def _splice_standalone(html):
 
 class PromptEngineerModule(Module):
     name = "Prompt Engineer"
-    version = "1.3.0"
+    version = "1.3.1"
     icon = "\u2728"  # ✨
     description = "Build, rewrite and generate image prompts through a local LM Studio model."
     order = 38
@@ -251,6 +295,7 @@ class PromptEngineerModule(Module):
     def routes_post(self):
         return {
             "/api/prompt-engineer/config": self._save_config,
+            "/api/prompt-engineer/browser-connection": self._browser_connection,
             "/api/prompt-engineer/models": self._models,
             "/api/prompt-engineer/chat": self._chat,
         }
@@ -274,11 +319,16 @@ class PromptEngineerModule(Module):
     def _get_cfg(self):
         service = getattr(self.hub, "ai_connection", None)
         if service is not None:
-            return service.resolve(self.key())
+            cfg = service.resolve(self.key())
+            cfg.get("custom", {})["api_key"] = self.setting("api_key") or ""
+            if cfg["connection_mode"] == "custom":
+                cfg["api_key"] = self.setting("api_key") or ""
+            return cfg
         return {
             "central_available": False, "connection_mode": "custom",
             "api_url": self._normalize_api_url(self.setting("api_url")),
             "model": self.setting("model") or "",
+            "api_key": self.setting("api_key") or "",
             "transport": self.setting("transport") or "browser",
             "connection_saved": bool(self.setting("api_url")),
         }
@@ -290,7 +340,10 @@ class PromptEngineerModule(Module):
             raise ValueError("Choose the CyberHub computer or browser computer.")
         service = getattr(self.hub, "ai_connection", None)
         if service is not None:
-            return service.module_values(data)
+            values = service.module_values(data)
+            if values["connection_mode"] == "custom":
+                values["api_key"] = api_key_value(data, self.hub.settings.get_module(self.key()))
+            return values
         if data.get("connection_mode", "custom") != "custom":
             raise ValueError("Update CyberHub to use the central connection. Your own connection remains available.")
         if data.get("transport", "browser") not in {"hub", "browser"}:
@@ -298,10 +351,26 @@ class PromptEngineerModule(Module):
         if not isinstance(data.get("model", ""), str) or len(data.get("model", "")) > 512:
             raise ValueError("Invalid model name.")
         return {"connection_mode": "custom", "api_url": self._normalize_api_url(data.get("api_url")),
-                "model": data.get("model", "").strip(), "transport": data.get("transport", "browser")}
+                "model": data.get("model", "").strip(), "transport": data.get("transport", "browser"),
+                "api_key": api_key_value(data, self.hub.settings.get_module(self.key()))}
+
+    def _browser_connection(self, handler, content_len, content_type):
+        try:
+            data = handler.read_body_json(content_len)
+            if not isinstance(data, dict):
+                raise ValueError("Expected connection settings.")
+            cfg = self._get_cfg() if data.get("saved") is True else self._draft_connection(data)
+            if cfg.get("connection_error"):
+                raise ValueError(cfg["connection_error"])
+            if cfg.get("transport") not in {"browser", "auto"}:
+                raise ValueError("This connection uses the CyberHub computer.")
+            # The explicit browser request needs this key; ordinary config never does.
+            handler.respond_json({"api_url": cfg["api_url"], "api_key": cfg.get("api_key", "")})
+        except ValueError as exc:
+            handler.respond_json({"error": str(exc)}, status=400)
 
     def _get_config(self, handler, qs):
-        handler.respond_json(self._get_cfg())
+        handler.respond_json(public_connection(self._get_cfg()))
 
     def _save_config(self, handler, content_len, content_type):
         try:
@@ -317,19 +386,19 @@ class PromptEngineerModule(Module):
                     else:
                         for key, value in values.items():
                             store.set_module_setting(self.key(), key, value)
-            handler.respond_json(self._get_cfg())
+            handler.respond_json(public_connection(self._get_cfg()))
         except ValueError as exc:
             handler.respond_json({"error": str(exc)}, status=400)
+
+    def _draft_connection(self, data):
+        values = self._connection_values(data)
+        return self.hub.ai_connection.shared() if values["connection_mode"] == "shared" else values
 
     def _models(self, handler, content_len, content_type):
         import requests
         try:
-            values = self._connection_values(handler.read_body_json(content_len))
-            if values["connection_mode"] == "shared":
-                cfg = self.hub.ai_connection.shared()
-            else:
-                cfg = values
-            response = requests.get(cfg["api_url"] + "/models", timeout=8)
+            cfg = self._draft_connection(handler.read_body_json(content_len))
+            response = requests.get(cfg["api_url"] + "/models", timeout=8, headers=auth_headers(cfg), allow_redirects=False)
             response.raise_for_status()
             handler.respond_json(response.json())
         except ValueError as exc:
@@ -355,7 +424,7 @@ class PromptEngineerModule(Module):
         started = False
         try:
             with requests.post(cfg["api_url"] + "/chat/completions", json=payload,
-                               stream=True, timeout=(8, 120)) as response:
+                               stream=True, timeout=(8, 120), headers=auth_headers(cfg), allow_redirects=False) as response:
                 if not response.ok:
                     handler.respond_json({"error": response.text[:4000]}, status=502)
                     return

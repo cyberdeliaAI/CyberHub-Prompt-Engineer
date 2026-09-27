@@ -117,7 +117,7 @@
             <h3 class="text-[10px] font-bold uppercase tracking-widest" style="color:var(--text-muted)">Connection</h3>
             <div>
               <label for="backend-select" class="text-xs block mb-1" style="color:var(--text-secondary)">Backend API</label>
-              <select id="backend-select" class="input-dark"><option value="lmstudio">OpenAI-compatible (LM Studio, MLX, …)</option></select>
+              <select id="backend-select" class="input-dark"><option value="lmstudio">OpenAI-compatible (LM Studio, oMLX, …)</option></select>
             </div>
             <div id="pe-connection-controls" hidden>
               <label for="pe-connection-mode" class="text-xs block mb-1">Connection source</label>
@@ -129,10 +129,16 @@
               <label for="ip-input" class="text-xs block mb-1" style="color:var(--text-secondary)">Server Address</label>
               <input type="text" id="ip-input" value="localhost:1234" class="input-dark" placeholder="localhost:1234">
             </div>
+            <div id="pe-api-key-field">
+              <label for="pe-api-key" class="text-xs block mb-1">API key (optional)</label>
+              <input id="pe-api-key" class="input-dark" type="password" autocomplete="new-password" spellcheck="false" placeholder="Only if your server requires a key">
+              <label class="text-xs"><input id="pe-clear-api-key" type="checkbox"> Remove saved API key</label>
+              <p class="text-xs mt-1">Leave blank to keep the saved key. A different server address clears it unless you enter a new key.</p>
+            </div>
             <div id="pe-transport-controls" hidden>
               <div id="pe-location-field"><label for="pe-transport" class="text-xs block mb-1">Connect from</label>
               <select id="pe-transport" class="input-dark"><option value="browser">Browser computer</option><option value="hub">CyberHub computer</option></select>
-              <p class="text-xs mt-1">localhost refers to the selected computer.</p></div>
+              <p class="text-xs mt-1">localhost refers to the selected computer. Browser connections send the API key through this browser.</p></div>
               <label for="pe-model" class="text-xs block mt-2 mb-1">Model override for Prompt Engineer</label>
               <input id="pe-model" class="input-dark" placeholder="Server default" spellcheck="false">
               <button id="pe-save-connection" class="btn-action mt-2" onclick="savePeConnection()">Save connection</button>
@@ -1609,6 +1615,8 @@ function normalizePeApiUrl(value) {
 function baseUrl() { return normalizePeApiUrl(peConnection?.api_url || els.ip.value); }
 function peConnectionFeedback(message) { document.getElementById('pe-connection-feedback').textContent=message; }
 function populatePeConnection(cfg) {
+  document.getElementById('pe-api-key').value = '';
+  document.getElementById('pe-clear-api-key').checked = false;
   peConnection = cfg;
   document.getElementById('pe-connection-controls').hidden = false;
   document.getElementById('pe-transport-controls').hidden = false;
@@ -1626,6 +1634,12 @@ function populatePeConnection(cfg) {
 function updatePeConnectionMode(switched=true) {
   const shared = document.getElementById('pe-connection-mode').value === 'shared';
   const values = shared ? peConnection?.shared || {} : peConnection?.custom || peConnection || {};
+  document.getElementById('pe-api-key-field').hidden = shared;
+  document.getElementById('pe-api-key').placeholder = values.api_key_set ? 'API key saved — leave blank to keep' : 'Only if your server requires a key';
+  if (switched) {
+    document.getElementById('pe-api-key').value = '';
+    document.getElementById('pe-clear-api-key').checked = false;
+  }
   if (switched) {
     els.ip.value = values.api_url || 'http://localhost:1234/v1';
     document.getElementById('pe-transport').value = values.transport || 'browser';
@@ -1641,14 +1655,29 @@ function updatePeConnectionMode(switched=true) {
     : shared ? (values.configured ? 'Uses ' + values.api_url + ' via the ' + (values.transport === 'hub' ? 'CyberHub' : 'browser') + ' computer. An empty model inherits its default.' : 'Save a central AI connection in Settings first.')
     : 'Only Prompt Engineer uses this connection. Switching to central preserves it.';
 }
+function peKeyDraft(shared=false) {
+  if (shared) return {};
+  if (document.getElementById('pe-clear-api-key').checked) return {api_key:''};
+  const key = document.getElementById('pe-api-key').value.trim();
+  return key ? {api_key:key} : {};
+}
 function peConnectionDraft() {
   const shared = document.getElementById('pe-connection-mode').value === 'shared';
   const model = document.getElementById('pe-model').value.trim();
-  return {connection_mode:shared ? 'shared' : 'custom', shared_model:shared ? model : '',
+  return {...peKeyDraft(shared), api_key_set:!!(shared ? peConnection?.shared?.api_key_set : (peConnection?.custom || peConnection)?.api_key_set), connection_mode:shared ? 'shared' : 'custom', shared_model:shared ? model : '',
     api_url:shared ? peConnection?.shared?.api_url || '' : normalizePeApiUrl(els.ip.value),
     model:shared ? model || peConnection?.shared?.model || '' : model,
     transport:shared ? peConnection?.shared?.transport || 'hub' : document.getElementById('pe-transport').value};
 }
+async function peBrowserHeaders(cfg, saved=false) {
+  if (cfg.api_key === '' || (!cfg.api_key_set && !cfg.api_key)) return {};
+  const response = await fetch('/api/prompt-engineer/browser-connection', {method:'POST', cache:'no-store', headers:{'Content-Type':'application/json'}, body:JSON.stringify(saved ? {saved:true} : cfg)});
+  const credentials = await response.json();
+  if (!response.ok || credentials.error) throw new Error(credentials.error || 'Could not read the saved API key');
+  if (normalizePeApiUrl(credentials.api_url) !== normalizePeApiUrl(cfg.api_url)) throw new Error('Connection changed. Please retry.');
+  return credentials.api_key ? {Authorization:'Bearer ' + credentials.api_key} : {};
+}
+
 async function loadPeConnection() {
   const response = await fetch('/api/prompt-engineer/config', {cache:'no-store'});
   if (response.status === 404) return; // Standalone page / older module hosting.
@@ -2212,11 +2241,12 @@ async function fetchModelInfo() {
   els.deriveCtxBtn.classList.add("opacity-50");
   try {
     await peConnectionReady;
-    const draft = peConnection ? peConnectionDraft() : {api_url:baseUrl(), transport:'browser'};
+    const draft = peConnection ? peConnectionDraft() : {api_url:baseUrl(), transport:'browser', ...peKeyDraft()};
     if (!draft.api_url) throw new Error('Save a central connection in Settings first.');
+    const headers = draft.transport === 'hub' ? {} : peConnection ? await peBrowserHeaders(draft) : draft.api_key ? {Authorization:'Bearer ' + draft.api_key} : {};
     const res = draft.transport === 'hub'
       ? await fetchWithTimeout('/api/prompt-engineer/models', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(draft)}, 10000)
-      : await fetchWithTimeout(normalizePeApiUrl(draft.api_url) + '/models', {}, 8000);
+      : await fetchWithTimeout(normalizePeApiUrl(draft.api_url) + '/models', {headers, redirect:'error'}, 8000);
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error?.message || data.error || 'Detection failed');
     let name = data.data?.[0]?.id;
@@ -2491,9 +2521,11 @@ function buildPayload(messages, minimal = false) {
 async function postChatCompletions(messages) {
   await refreshPeConnection();
   const endpoint = peConnection?.transport === 'hub' ? '/api/prompt-engineer/chat' : baseUrl() + '/chat/completions';
+  const headers = peConnection?.transport === 'hub' ? {} : peConnection ? await peBrowserHeaders(peConnection, true) : peKeyDraft().api_key ? {Authorization:'Bearer ' + peKeyDraft().api_key} : {};
   const opts = (body) => ({
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
+    redirect: "error",
     signal: state.abortController.signal,
     body: JSON.stringify(body)
   });

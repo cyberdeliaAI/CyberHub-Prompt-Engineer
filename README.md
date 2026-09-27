@@ -2,7 +2,7 @@
 
 Build and rewrite image prompts with a local LM Studio model.
 
-- Version: `1.3.0`
+- Version: `1.3.1`
 - Channel: `stable`
 - Publisher: `official`
 
@@ -49,6 +49,22 @@ checkouts and the CyberHub Python environment (`requests` required). Set
 `CYBERHUB_CORE` and `CYBERHUB_CAPTIONER` to select other checkouts, including an
 older Core to verify compatibility. Tests use temporary settings and mock
 model responses, without modifying an installed Hub.
+
+## API keys (1.3.1)
+
+The central connection inherits the API key saved in Settings. An own connection
+has its own optional **API key** field, for example for oMLX authentication.
+Leave it blank to keep the saved key; select **Remove saved API key** to delete it.
+Changing the server address clears the old key unless you enter a new one.
+Model detection and generation use the same key, including browser connections.
+Keys are stored locally in CyberHub's `settings.json`, not in browser preferences.
+A direct browser connection receives the key only when it needs to contact the server.
+
+API-key support is included in 1.3.1. Update through **Module Manager → Check
+for updates**, then restart. For a central API key, also install the revised
+CyberHub 1.4.0 package. If Core 1.4.0 is already installed, reimport its current
+ZIP through **Settings → Maintenance → Import update or module ZIP**, because
+Core's version number remains unchanged.
 
 ## Python Packages
 

@@ -70,3 +70,27 @@ test('cancellation while refreshing connection reaches the model request', async
  h.ctx.fetch=async(_url,opts)=>{assert.equal(opts.signal.aborted,true);throw new Error('Stopped');};
  await assert.rejects(h.run('fetchWithTimeout("http://local/v1/chat/completions",{signal:state.abortController.signal})'),/Stopped/);
 });
+
+
+test('key fields preserve, replace and clear without filling a saved password',()=>{
+ const h=harness();h.ctx.cfg={...cfg,connection_mode:'custom',api_key_set:true,custom:{...cfg.custom,api_key_set:true}};
+ h.run('populatePeConnection(cfg)');assert.equal(h.el('pe-api-key').value,'');assert.match(h.el('pe-api-key').placeholder,/saved/);
+ assert.equal(Object.hasOwn(h.run('peConnectionDraft()'),'api_key'),false);
+ h.el('pe-api-key').value='new-secret';assert.equal(h.run('peConnectionDraft().api_key'),'new-secret');
+ h.el('pe-clear-api-key').checked=true;assert.equal(h.run('peConnectionDraft().api_key'),'');
+});
+test('browser streaming sends a saved key on retries without persisting it',async()=>{
+ const h=harness();h.ctx.cfg={...cfg,transport:'browser',api_key_set:true};h.run('populatePeConnection(cfg);state.abortController=new AbortController();showToast=()=>{}');
+ const calls=[];h.ctx.fetch=async(url,opts)=>{calls.push({url,opts});
+ if(url.endsWith('/config'))return reply(h.ctx.cfg);
+ if(url.endsWith('/browser-connection'))return reply({api_url:cfg.api_url,api_key:'saved-secret'});
+ if(calls.length===3)return {ok:false,text:async()=> 'unsupported top_k'};
+ return reply({});};
+ await h.run('postChatCompletions([])');assert.equal(calls.length,4);
+ for(const call of calls.slice(2)){assert.equal(call.opts.headers.Authorization,'Bearer saved-secret');assert.equal(call.opts.redirect,'error');}
+ assert.equal(h.run('peConnection.api_key'),undefined);assert.equal(JSON.stringify([...h.storage]).includes('saved-secret'),false);
+});
+test('browser credentials fail closed if the saved endpoint changes',async()=>{
+ const h=harness();h.ctx.fetch=async()=>reply({api_url:'http://changed/v1',api_key:'secret'});
+ await assert.rejects(h.run('peBrowserHeaders({api_url:"http://old/v1",api_key_set:true},true)'),/Connection changed/);
+});
