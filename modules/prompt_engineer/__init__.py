@@ -11,15 +11,19 @@ Re-implementing that natively would be a major undertaking, so instead we:
      header bar (the hub topbar already labels the page)
 
 Tailwind CDN is loaded only when the Prompt Engineer page is visited. The
-standalone JS is left untouched — it references DOM elements by ID and those
-IDs survive the splice.
+page keeps a standalone browser fallback. When hosted by CyberHub, connection
+APIs persist its own configuration and optionally resolve the central Core
+connection; Hub-side requests support streamed model responses.
 
 If the standalone HTML is ever updated, drop the new file in static/ and
 the next page reload picks it up automatically.
 """
 
 import os
+import json
 import re
+import threading
+from urllib.parse import urlsplit, urlunsplit
 from core import Module
 from core.server import build_shell, _font_links
 
@@ -68,6 +72,8 @@ body {
    the hub since the hub topbar already labels the page. */
 #sidebar > .p-5.border-b.shrink-0 { display: none !important; }
 #sidebar #settings-panel { padding-top: 14px; }
+#pe-central-link { color:var(--accent); }
+#pe-connection-note, #pe-connection-feedback { color:var(--text-dim); overflow-wrap:anywhere; }
 
 /* ── Palette: standalone uses red, hub uses blue accent ───────────────────
    We rebind the CSS variables the standalone defines, then patch the
@@ -217,11 +223,12 @@ def _splice_standalone(html):
 
 class PromptEngineerModule(Module):
     name = "Prompt Engineer"
-    version = "1.2"
+    version = "1.3.0"
     icon = "\u2728"  # ✨
     description = "Build, rewrite and generate image prompts through a local LM Studio model."
     order = 38
     settings_schema = {}
+    _connection_lock = threading.Lock()
 
     def key(self):
         # Stable URL/settings key without spaces in the navigation path.
@@ -238,7 +245,142 @@ class PromptEngineerModule(Module):
         return {
             "/prompt-engineer": self._page,
             "/prompt-engineer/guide": self._guide,
+            "/api/prompt-engineer/config": self._get_config,
         }
+
+    def routes_post(self):
+        return {
+            "/api/prompt-engineer/config": self._save_config,
+            "/api/prompt-engineer/models": self._models,
+            "/api/prompt-engineer/chat": self._chat,
+        }
+
+    @staticmethod
+    def _normalize_api_url(value):
+        value = str(value or "http://localhost:1234").strip()
+        if "://" not in value:
+            value = "http://" + value
+        parsed = urlsplit(value)
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or any(c.isspace() for c in value)):
+            raise ValueError("Use an HTTP or HTTPS server address without credentials, query or fragment.")
+        parsed.port
+        path = parsed.path.rstrip("/")
+        if not path.lower().endswith("/v1"):
+            path += "/v1"
+        return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+    def _get_cfg(self):
+        service = getattr(self.hub, "ai_connection", None)
+        if service is not None:
+            return service.resolve(self.key())
+        return {
+            "central_available": False, "connection_mode": "custom",
+            "api_url": self._normalize_api_url(self.setting("api_url")),
+            "model": self.setting("model") or "",
+            "transport": self.setting("transport") or "browser",
+            "connection_saved": bool(self.setting("api_url")),
+        }
+
+    def _connection_values(self, data):
+        if not isinstance(data, dict):
+            raise ValueError("Expected connection settings.")
+        if data.get("transport", "browser") not in {"hub", "browser"}:
+            raise ValueError("Choose the CyberHub computer or browser computer.")
+        service = getattr(self.hub, "ai_connection", None)
+        if service is not None:
+            return service.module_values(data)
+        if data.get("connection_mode", "custom") != "custom":
+            raise ValueError("Update CyberHub to use the central connection. Your own connection remains available.")
+        if data.get("transport", "browser") not in {"hub", "browser"}:
+            raise ValueError("Choose the CyberHub computer or browser computer.")
+        if not isinstance(data.get("model", ""), str) or len(data.get("model", "")) > 512:
+            raise ValueError("Invalid model name.")
+        return {"connection_mode": "custom", "api_url": self._normalize_api_url(data.get("api_url")),
+                "model": data.get("model", "").strip(), "transport": data.get("transport", "browser")}
+
+    def _get_config(self, handler, qs):
+        handler.respond_json(self._get_cfg())
+
+    def _save_config(self, handler, content_len, content_type):
+        try:
+            data = handler.read_body_json(content_len)
+            values = self._connection_values(data)
+            with self._connection_lock:
+                # The first browser may import its legacy connection; later browsers
+                # must never overwrite a connection already stored by CyberHub.
+                if not (data.get("initialize_only") and self._get_cfg()["connection_saved"]):
+                    store = self.hub.settings
+                    if hasattr(store, "set_module_settings"):
+                        store.set_module_settings(self.key(), values)
+                    else:
+                        for key, value in values.items():
+                            store.set_module_setting(self.key(), key, value)
+            handler.respond_json(self._get_cfg())
+        except ValueError as exc:
+            handler.respond_json({"error": str(exc)}, status=400)
+
+    def _models(self, handler, content_len, content_type):
+        import requests
+        try:
+            values = self._connection_values(handler.read_body_json(content_len))
+            if values["connection_mode"] == "shared":
+                cfg = self.hub.ai_connection.shared()
+            else:
+                cfg = values
+            response = requests.get(cfg["api_url"] + "/models", timeout=8)
+            response.raise_for_status()
+            handler.respond_json(response.json())
+        except ValueError as exc:
+            handler.respond_json({"error": str(exc)}, status=400)
+        except requests.RequestException as exc:
+            handler.respond_json({"error": str(exc)}, status=503)
+
+    def _chat(self, handler, content_len, content_type):
+        """Relay the saved Hub connection as SSE; never accept a request URL in the body."""
+        import requests
+        data = handler.read_body_json(content_len)
+        if not isinstance(data, dict) or not isinstance(data.get("messages"), list):
+            handler.respond_json({"error": "Expected chat messages."}, status=400)
+            return
+        cfg = self._get_cfg()
+        if cfg.get("connection_error") or cfg.get("transport") != "hub":
+            handler.respond_json({"error": cfg.get("connection_error") or "This connection uses the browser computer."}, status=400)
+            return
+        payload = {key: data[key] for key in ("messages", "temperature", "top_p", "max_tokens", "top_k", "presence_penalty") if key in data}
+        payload["stream"] = True
+        if cfg["model"]:
+            payload["model"] = cfg["model"]
+        started = False
+        try:
+            with requests.post(cfg["api_url"] + "/chat/completions", json=payload,
+                               stream=True, timeout=(8, 120)) as response:
+                if not response.ok:
+                    handler.respond_json({"error": response.text[:4000]}, status=502)
+                    return
+                handler.send_response(200)
+                handler.send_header("Content-Type", "text/event-stream")
+                handler.send_header("Cache-Control", "no-cache")
+                handler.send_header("Connection", "close")
+                handler.end_headers()
+                handler.close_connection = True
+                started = True
+                for line in response.iter_lines(chunk_size=1):
+                    handler.wfile.write(line + b"\n")
+                    handler.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except requests.RequestException as exc:
+            if not started:
+                handler.respond_json({"error": str(exc)}, status=503)
+            else:
+                try:
+                    handler.wfile.write(("data: " + json.dumps({"error": "Model connection interrupted: " + str(exc)}) + "\n\n").encode("utf-8"))
+                    handler.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                handler.close_connection = True
 
     def prefix_routes(self):
         return {"/pe-assets/": self._serve_asset}

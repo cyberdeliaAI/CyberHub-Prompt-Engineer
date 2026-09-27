@@ -117,11 +117,26 @@
             <h3 class="text-[10px] font-bold uppercase tracking-widest" style="color:var(--text-muted)">Connection</h3>
             <div>
               <label for="backend-select" class="text-xs block mb-1" style="color:var(--text-secondary)">Backend API</label>
-              <select id="backend-select" class="input-dark"><option value="lmstudio">LM Studio (Vision Supported)</option></select>
+              <select id="backend-select" class="input-dark"><option value="lmstudio">OpenAI-compatible (LM Studio, MLX, …)</option></select>
             </div>
-            <div>
+            <div id="pe-connection-controls" hidden>
+              <label for="pe-connection-mode" class="text-xs block mb-1">Connection source</label>
+              <select id="pe-connection-mode" class="input-dark" onchange="updatePeConnectionMode()"><option value="custom">Own connection</option><option value="shared">Central connection</option></select>
+              <p id="pe-connection-note" class="text-xs mt-1"></p>
+              <a id="pe-central-link" href="/settings#ai-connection" class="text-xs">Manage central AI connection</a>
+            </div>
+            <div id="pe-address-field">
               <label for="ip-input" class="text-xs block mb-1" style="color:var(--text-secondary)">Server Address</label>
               <input type="text" id="ip-input" value="localhost:1234" class="input-dark" placeholder="localhost:1234">
+            </div>
+            <div id="pe-transport-controls" hidden>
+              <div id="pe-location-field"><label for="pe-transport" class="text-xs block mb-1">Connect from</label>
+              <select id="pe-transport" class="input-dark"><option value="browser">Browser computer</option><option value="hub">CyberHub computer</option></select>
+              <p class="text-xs mt-1">localhost refers to the selected computer.</p></div>
+              <label for="pe-model" class="text-xs block mt-2 mb-1">Model override for Prompt Engineer</label>
+              <input id="pe-model" class="input-dark" placeholder="Server default" spellcheck="false">
+              <button id="pe-save-connection" class="btn-action mt-2" onclick="savePeConnection()">Save connection</button>
+              <p id="pe-connection-feedback" class="text-xs mt-1" role="status"></p>
             </div>
             <div>
               <label class="text-xs block mb-1" style="color:var(--text-secondary)">Detected Model</label>
@@ -1519,14 +1534,15 @@ const els = {
 async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   const controller = new AbortController();
   // If caller provided their own signal (e.g. for user abort), chain them
-  if (options.signal) {
-    options.signal.addEventListener('abort', () => controller.abort());
-  }
+  const abort = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener('abort', abort, {once:true});
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(id);
+    options.signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -1580,10 +1596,102 @@ function closeSidebar() { els.sidebar.classList.add('-translate-x-full'); els.si
 /* =========================================
    BASE URL — strips trailing slashes, adds protocol
    ========================================= */
-function baseUrl() {
-  let s = els.ip.value.trim();
-  if (!s.startsWith("http")) s = "http://" + s;
-  return s.replace(/\/+$/, "");
+let peConnection = null;
+let peConnectionReady = Promise.resolve();
+
+function normalizePeApiUrl(value) {
+  let address = String(value || 'http://localhost:1234').trim();
+  if (!/^https?:\/\//i.test(address)) address = 'http://' + address;
+  address = address.replace(/\/+$/, '');
+  if (!/\/v1$/i.test(address)) address += '/v1';
+  return address;
+}
+function baseUrl() { return normalizePeApiUrl(peConnection?.api_url || els.ip.value); }
+function peConnectionFeedback(message) { document.getElementById('pe-connection-feedback').textContent=message; }
+function populatePeConnection(cfg) {
+  peConnection = cfg;
+  document.getElementById('pe-connection-controls').hidden = false;
+  document.getElementById('pe-transport-controls').hidden = false;
+  const mode = document.getElementById('pe-connection-mode');
+  mode.value = cfg.connection_mode || 'custom';
+  mode.disabled = !cfg.central_available;
+  document.getElementById('pe-central-link').hidden = !cfg.central_available;
+  els.ip.value = cfg.api_url;
+  document.getElementById('pe-transport').value = cfg.transport || 'browser';
+  document.getElementById('pe-model').value = mode.value === 'shared' ? cfg.shared_model || '' : cfg.model || '';
+  state.modelName = cfg.model || '';
+  els.modelDisplay.textContent = cfg.model || 'Server default';
+  updatePeConnectionMode(false);
+}
+function updatePeConnectionMode(switched=true) {
+  const shared = document.getElementById('pe-connection-mode').value === 'shared';
+  const values = shared ? peConnection?.shared || {} : peConnection?.custom || peConnection || {};
+  if (switched) {
+    els.ip.value = values.api_url || 'http://localhost:1234/v1';
+    document.getElementById('pe-transport').value = values.transport || 'browser';
+    document.getElementById('pe-model').value = shared ? peConnection?.shared_model || '' : values.model || '';
+  }
+  document.getElementById('pe-address-field').hidden = shared;
+  document.getElementById('pe-location-field').hidden = shared;
+  els.ip.disabled = shared;
+  document.getElementById('pe-transport').disabled = shared;
+  document.getElementById('pe-model').placeholder = shared ? peConnection?.shared?.model || 'Central / server default' : 'Server default';
+  document.getElementById('pe-connection-note').textContent = !peConnection?.central_available
+    ? 'Own connection is available. Update CyberHub to enable central settings.'
+    : shared ? (values.configured ? 'Uses ' + values.api_url + ' via the ' + (values.transport === 'hub' ? 'CyberHub' : 'browser') + ' computer. An empty model inherits its default.' : 'Save a central AI connection in Settings first.')
+    : 'Only Prompt Engineer uses this connection. Switching to central preserves it.';
+}
+function peConnectionDraft() {
+  const shared = document.getElementById('pe-connection-mode').value === 'shared';
+  const model = document.getElementById('pe-model').value.trim();
+  return {connection_mode:shared ? 'shared' : 'custom', shared_model:shared ? model : '',
+    api_url:shared ? peConnection?.shared?.api_url || '' : normalizePeApiUrl(els.ip.value),
+    model:shared ? model || peConnection?.shared?.model || '' : model,
+    transport:shared ? peConnection?.shared?.transport || 'hub' : document.getElementById('pe-transport').value};
+}
+async function loadPeConnection() {
+  const response = await fetch('/api/prompt-engineer/config', {cache:'no-store'});
+  if (response.status === 404) return; // Standalone page / older module hosting.
+  const cfg = await response.json();
+  if (!response.ok || cfg.error) throw new Error(cfg.error || 'Could not load connection');
+  let legacy = {};
+  try {
+    legacy = {...JSON.parse(localStorage.getItem(CONFIG.storageKey) || '{}'), ...JSON.parse(localStorage.getItem(CONFIG.storageKey + '-prefs') || '{}')};
+  } catch(e) {}
+  let migratedBefore = false;
+  try {migratedBefore = localStorage.getItem(CONFIG.storageKey + '-connection-migrated') === '1';} catch(e) {}
+  if (!cfg.connection_saved && legacy.ip && !migratedBefore) {
+    const migrated = await fetch('/api/prompt-engineer/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      connection_mode:'custom', api_url:normalizePeApiUrl(legacy.ip), model:legacy.modelName === 'Unknown' ? '' : legacy.modelName || '', transport:'browser', initialize_only:true
+    })});
+    const saved = await migrated.json();
+    if (!migrated.ok || saved.error) throw new Error(saved.error || 'Could not preserve existing connection');
+    populatePeConnection(saved);
+    peConnectionFeedback('Existing browser connection preserved as an own connection.');
+  } else populatePeConnection(cfg);
+  try {localStorage.setItem(CONFIG.storageKey + '-connection-migrated', '1');} catch(e) {}
+}
+async function refreshPeConnection() {
+  await peConnectionReady;
+  if (!peConnection) return;
+  const response = await fetch('/api/prompt-engineer/config', {cache:'no-store'});
+  const cfg = await response.json();
+  if (!response.ok || cfg.error || cfg.connection_error) throw new Error(cfg.error || cfg.connection_error || 'Could not refresh connection');
+  peConnection = cfg; // Leave unsaved controls alone; generation uses the saved config.
+  state.modelName = cfg.model || '';
+}
+async function savePeConnection() {
+  const button = document.getElementById('pe-save-connection');
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/prompt-engineer/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(peConnectionDraft())});
+    const cfg = await response.json();
+    if (!response.ok || cfg.error) throw new Error(cfg.error || 'Save failed');
+    populatePeConnection(cfg);
+    peConnectionFeedback('Connection saved.');
+  } catch(e) {peConnectionFeedback('Save failed: ' + e.message);}
+  finally {button.disabled = false;}
 }
 
 /* =========================================
@@ -1735,7 +1843,12 @@ function applyPromptMode(name) {
 
 function getActiveSystemPrompt() { return els.sysPreview.value; }
 
-function validateServer(addr) { return CONFIG.serverAddressPattern.test(addr.replace(/^https?:\/\//, '')); }
+function validateServer(addr) {
+  try {
+    const url = new URL(normalizePeApiUrl(addr));
+    return ['http:', 'https:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password && !url.search && !url.hash;
+  } catch(e) {return false;}
+}
 
 function estimateTokens(text) { return Math.ceil((text || '').length / 3.5); }
 
@@ -1802,11 +1915,9 @@ function clearGenerationOverrides(notify = true) {
 function preferenceSnapshot() {
   return {
     generationOverridesVersion: 1,
-    backend: els.backend?.value || 'lmstudio',
-    ip: els.ip.value,
+    ...(!peConnection ? {backend:els.backend?.value || 'lmstudio', ip:els.ip.value, modelName:state.modelName} : {}),
     sys: els.sysSelect.value,
     maxContext: parseInt(els.ctxInput.value, 10) || state.maxContext,
-    modelName: state.modelName,
     temperature: els.temp.value,
     topP: els.topp.value,
     maxTokens: els.maxtokens.value,
@@ -1868,7 +1979,7 @@ function applyPreferenceControls(values) {
   if (values.backend && [...els.backend.options].some(option => option.value === values.backend)) {
     els.backend.value = values.backend;
   }
-  if (values.ip) els.ip.value = values.ip;
+  if (values.ip && !peConnection) els.ip.value = values.ip;
   if (values.sys && PROMPTS[values.sys]) els.sysSelect.value = values.sys;
 
   const context = Number(values.maxContext);
@@ -2100,10 +2211,20 @@ async function fetchModelInfo() {
   els.deriveCtxBtn.innerText = "Fetching...";
   els.deriveCtxBtn.classList.add("opacity-50");
   try {
-    const res = await fetchWithTimeout(`${baseUrl()}/v1/models`, {}, 8000);
+    await peConnectionReady;
+    const draft = peConnection ? peConnectionDraft() : {api_url:baseUrl(), transport:'browser'};
+    if (!draft.api_url) throw new Error('Save a central connection in Settings first.');
+    const res = draft.transport === 'hub'
+      ? await fetchWithTimeout('/api/prompt-engineer/models', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(draft)}, 10000)
+      : await fetchWithTimeout(normalizePeApiUrl(draft.api_url) + '/models', {}, 8000);
     const data = await res.json();
-    let name = data.data?.[0]?.id || "Unknown";
-    const parts = name.split("/"); if (parts.length > 1) name = parts[parts.length - 1];
+    if (!res.ok || data.error) throw new Error(data.error?.message || data.error || 'Detection failed');
+    let name = data.data?.[0]?.id;
+    if (!name) throw new Error('No models found');
+    if (peConnection) {
+      document.getElementById('pe-model').value = name;
+      peConnectionFeedback('Detected model. Save connection to use it.');
+    }
     state.modelName = name;
     els.modelDisplay.innerText = name;
     els.modelDisplay.style.color = '#4ade80';
@@ -2347,7 +2468,8 @@ function buildPayload(messages, minimal = false) {
     stream: true
   };
 
-  if (state.modelName && state.modelName !== "Unknown") payload.model = state.modelName;
+  const model = peConnection ? peConnection.model : state.modelName;
+  if (model && model !== "Unknown") payload.model = model;
 
   const temperature = optionalGenerationNumber(els.temp);
   const topP = optionalGenerationNumber(els.topp);
@@ -2367,6 +2489,8 @@ function buildPayload(messages, minimal = false) {
 }
 
 async function postChatCompletions(messages) {
+  await refreshPeConnection();
+  const endpoint = peConnection?.transport === 'hub' ? '/api/prompt-engineer/chat' : baseUrl() + '/chat/completions';
   const opts = (body) => ({
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2375,7 +2499,7 @@ async function postChatCompletions(messages) {
   });
 
   let res = await fetchWithTimeout(
-    `${baseUrl()}/v1/chat/completions`,
+    endpoint,
     opts(buildPayload(messages, false)),
     90000 // 90s — first-token latency for vision models can be significant
   );
@@ -2388,7 +2512,7 @@ async function postChatCompletions(messages) {
   if (/top_k|presence_penalty|unsupported|unknown.*(param|field|key)/i.test(errText)) {
     showToast("Retrying with minimal payload...", "info");
     res = await fetchWithTimeout(
-      `${baseUrl()}/v1/chat/completions`,
+      endpoint,
       opts(buildPayload(messages, true)),
       90000
     );
@@ -2443,7 +2567,7 @@ function applyModelPreset(modelName) {
 
 async function sendMessageCore(txt, img, skipUserAppend) {
   if (!txt || state.waiting) return;
-  if (!validateServer(els.ip.value.trim())) { showToast('Invalid server address', 'error'); return; }
+  if (!validateServer(baseUrl())) { showToast('Invalid server address', 'error'); return; }
 
   state.waiting = true;
   state.abortController = new AbortController();
@@ -2481,11 +2605,11 @@ async function sendMessageCore(txt, img, skipUserAppend) {
         if (!line.startsWith("data: ")) continue;
         const j = line.slice(6).trim();
         if (j === "[DONE]") { streamDone = true; break; }
-        try {
-          const parsed = JSON.parse(j);
-          const textChunk = extractDeltaText(parsed);
-          if (textChunk) { fullResponse += textChunk; targetDiv.innerText = fullResponse; targetDiv.appendChild(cursor); els.chat.scrollTop = els.chat.scrollHeight; }
-        } catch { /* partial JSON chunk — completed next iteration */ }
+        let parsed;
+        try {parsed = JSON.parse(j);} catch {continue;}
+        if (parsed.error) throw new Error(parsed.error.message || parsed.error);
+        const textChunk = extractDeltaText(parsed);
+        if (textChunk) { fullResponse += textChunk; targetDiv.innerText = fullResponse; targetDiv.appendChild(cursor); els.chat.scrollTop = els.chat.scrollHeight; }
       }
     }
     state.history.push({ role: 'bot', content: fullResponse.trim() });
@@ -2550,6 +2674,8 @@ function init() {
   rebuildDropdown(storedPromptName());
   restoreState();
   state.initializing = false;
+  peConnectionReady = loadPeConnection();
+  peConnectionReady.catch(e => peConnectionFeedback('Connection unavailable: ' + e.message));
 
   // Auto-load prompts.json from same directory
   fetchWithTimeout(`./prompts.json?ts=${Date.now()}`, { cache: "no-store" }, 5000).then(r => r.ok ? r.json() : null).then(data => {

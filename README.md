@@ -2,7 +2,7 @@
 
 Build and rewrite image prompts with a local LM Studio model.
 
-- Version: `1.2`
+- Version: `1.3.0`
 - Channel: `stable`
 - Publisher: `official`
 
@@ -14,6 +14,41 @@ Build and rewrite image prompts with a local LM Studio model.
 4. Restart CyberHub when the installation finishes.
 
 The ZIP attached to this repository's GitHub Release can also be imported manually through Settings.
+
+## Shared AI connection
+
+Choose **Central connection** in the connection panel to use **Settings → AI
+connection** (Core 1.4.0 / Settings 1.5.0). An optional model override applies only
+to Prompt Engineer. Leave it empty to inherit the central model. **Own
+connection** retains a separate server and model. Choose where the connection
+runs: **CyberHub computer** supports streaming through CyberHub; **Browser
+computer** connects directly. `localhost` refers to the chosen computer.
+
+**Detect Model** fills the full model ID; **Save connection** applies edits.
+Detection tests the form without saving it. Generation uses saved settings and
+refreshes them before each request, so central changes apply without restarting.
+
+An existing browser connection is imported once into the module's own settings
+if CyberHub has no saved module connection. Other browsers cannot overwrite it.
+New setups inherit an already configured central connection. The own connection
+is preserved when switching to central. Generation controls, image processing,
+context and chat history remain browser preferences.
+
+Updated Prompt Engineer also runs on Core 1.3.x with its own connection. There
+is no mandatory Core update to continue using the module.
+
+## Development tests
+
+```sh
+node --test tests/connection.test.cjs
+python -m unittest discover -s tests -v
+```
+
+The Python integration tests use sibling CyberHub and CyberHub-Captioner
+checkouts and the CyberHub Python environment (`requests` required). Set
+`CYBERHUB_CORE` and `CYBERHUB_CAPTIONER` to select other checkouts, including an
+older Core to verify compatibility. Tests use temporary settings and mock
+model responses, without modifying an installed Hub.
 
 ## Python Packages
 
