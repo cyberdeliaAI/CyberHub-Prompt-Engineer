@@ -398,19 +398,19 @@
       <div class="step-num">5</div>
       <div>
         <h2>Connect the Prompt-Engineer Tool</h2>
-        <p>Open the HTML file and point it at your running LM Studio server.</p>
+        <p>Open Prompt Engineer in CyberHub and connect it to your running model server.</p>
       </div>
     </div>
     <div class="step-body">
 
       <ol class="steps-list">
-        <li>Open <code>prompt-engineer.html</code> in your browser (drag it into a Chrome or Firefox window, or double-click it).</li>
-        <li>In the <strong>Server Address</strong> field (top of the left sidebar), enter:<br>
+        <li>Open <strong>Prompt Engineer</strong> in CyberHub. Click the compact <strong>Connection</strong> card or <strong>Settings</strong> in the chat header.</li>
+        <li>Choose <strong>Own connection</strong> and enter a <strong>Server Address</strong>:<br>
           <code>localhost:1234</code><br>
           Or if accessing from another machine on your network, use the IP address shown in LM Studio.
         </li>
-        <li>Click <strong>Detect Model</strong>. If the connection succeeds, the model name will appear in green under the address field and the context limit will be auto-set.</li>
-        <li>Select a <strong>System Prompt</strong> from the dropdown. For image captioning with this model, start with <strong>Z-Image: Caption from Image</strong> or <strong>Qwen-Image: Caption from Image</strong>.</li>
+        <li>Choose the computer that connects to the model. Click <strong>Detect Model</strong> to fill the model and, when reported, the context limit. Click <strong>Save settings</strong> to apply them. Detection does not save the form; Cancel or Escape discards edits. You can also choose <strong>Central connection</strong> to use the connection configured in CyberHub Settings.</li>
+        <li>Choose a <strong>Collection</strong>, then select a <strong>System Prompt</strong> from the dropdown. For image captioning with this model, start with <strong>Z-Image: Caption from Image</strong> or <strong>Qwen-Image: Caption from Image</strong>.</li>
         <li>The badge below the dropdown will show the mode:
           <div class="tag-pair">
             <span class="badge badge-green">🟢 Vision — requires image</span>
@@ -422,6 +422,11 @@
         <li>Press <strong>Enter</strong> or click the send button. The model response streams in real time.</li>
       </ol>
 
+      <div class="card" style="margin-top:16px;">
+        <div class="card-title">Prompt folders</div>
+        <p>Built-in presets remain available alongside Krea2 and ZIT. Add UTF-8 text files under <code>resources/prompt-engineer/prompts/</code> on the CyberHub computer, then click <strong>Refresh</strong>. Each subfolder becomes a collection. Text files default to Rewrite; a separate word Vision in the filename enables image input. A JSON file with title, mode and text can specify vision, rewrite or generate explicitly.</p>
+        <p>Search and collection browsing keep the current prompt active. Editor changes are saved in this browser, not written back to files. Use your own filenames for permanent variations.</p>
+      </div>
       <div class="callout info" style="margin-top:16px;">
         <span class="callout-icon">ℹ️</span>
         <p><strong>Changing system prompts</strong> automatically clears the chat history. This ensures the model always starts fresh with the new instructions rather than continuing from a previous conversation.</p>
@@ -454,7 +459,7 @@
 
       <div class="callout tip">
         <span class="callout-icon">💡</span>
-        <p><strong>When Detect Model runs</strong> and recognizes a Qwen-VL model, the tool applies only safe context and image-preprocessing defaults. It does not change generation overrides. Use <strong>Clear overrides</strong> to let LM Studio control all five values.</p>
+        <p>Generation overrides are in the <strong>Settings</strong> dialog. Use <strong>Clear overrides</strong>, then <strong>Save settings</strong>, to use the server defaults. Detection only fills the model and reported context in the draft; image preprocessing stays under its own collapsible section in the sidebar.</p>
       </div>
 
       <div class="card" style="margin-top:8px;">
@@ -511,7 +516,7 @@
       <div class="card">
         <div class="card-title">Context window</div>
         <ul class="bullet-list">
-          <li><strong>Default context</strong> — The tool defaults to 8192 tokens. After clicking Detect Model, it will use the value reported by LM Studio if available.</li>
+          <li><strong>Default context</strong> — The tool defaults to 8192 tokens. Detect Model fills a reported context value when available; Save settings applies it.</li>
           <li><strong>Vision token cost</strong> — A 512px image uses ~900 tokens, a 768px image uses ~1800. Add your system prompt size (~600–800 tokens for detailed prompts) and chat history to estimate total usage.</li>
           <li><strong>Context trimming</strong> — The tool automatically trims old messages when history exceeds 75% of the context window.</li>
         </ul>

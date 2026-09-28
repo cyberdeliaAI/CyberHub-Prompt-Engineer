@@ -7,10 +7,15 @@ const html = fs.readFileSync(path.join(__dirname,'../modules/prompt_engineer/sta
 const script = html.split('<script>')[1].split('</script>')[0].replace(/init\(\);\s*$/, '');
 function harness(saved={}) {
   const elements = new Map();
-  const el = id => {if (!elements.has(id)) elements.set(id,{value:'',style:{},dataset:{},options:[],classList:{add(){},remove(){}},addEventListener(){}});return elements.get(id);};
+  const makeElement = id => ({id, value:'', min:'', max:'', style:{}, dataset:{}, options:[], children:[], checked:false,
+    classList:{add(){},remove(){},toggle(){}}, addEventListener(){},
+    appendChild(child){this.children.push(child);return child;},
+    set innerHTML(value){this.children=[];}, get innerHTML(){return '';},
+    showModal(){this.open=true;},close(){this.open=false;},reportValidity(){return true;}});
+  const el = id => {if (!elements.has(id)) elements.set(id,makeElement(id));return elements.get(id);};
   const storage = new Map(Object.entries(saved));
   const ctx = vm.createContext({console, feather:{replace(){}}, URL, AbortController, setTimeout, clearTimeout,
-    document:{getElementById:el}, localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},
+    document:{getElementById:el, createElement:()=>makeElement(''), querySelectorAll:()=>[]}, localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},
     fetch:async()=>{throw Error('Unexpected request');}});
   vm.runInContext(script,ctx);
   return {ctx,el,storage,run:code=>vm.runInContext(code,ctx)};
@@ -93,4 +98,87 @@ test('browser streaming sends a saved key on retries without persisting it',asyn
 test('browser credentials fail closed if the saved endpoint changes',async()=>{
  const h=harness();h.ctx.fetch=async()=>reply({api_url:'http://changed/v1',api_key:'secret'});
  await assert.rejects(h.run('peBrowserHeaders({api_url:"http://old/v1",api_key_set:true},true)'),/Connection changed/);
+});
+
+
+test('settings drafts never affect generation or saved preferences and cancel restores them',async()=>{
+ const h=harness();h.ctx.cfg=cfg;
+ h.run('populatePeConnection(cfg);state.initializing=false;showToast=()=>{}');
+ h.el('rng-temp').value='0.3';h.el('ctx-input').value='8192';
+ await h.run('openPeSettings()');
+ h.el('rng-temp').value='1.5';h.el('ctx-input').value='16384';h.el('pe-model').value='unsaved';
+ assert.equal(h.run('buildPayload([]).temperature'),0.3);
+ assert.equal(h.run('preferenceSnapshot().temperature'),'0.3');
+ assert.equal(h.run('state.maxContext'),8192);
+ h.run('saveQuickPrefs()');assert.equal(JSON.parse(h.storage.get('prompt-engineer-v3-prefs')).temperature,'0.3');
+ h.run('clearGenerationOverrides();closePeSettings()');
+ assert.equal(h.el('rng-temp').value,'0.3');assert.equal(h.el('ctx-input').value,'8192');
+ assert.equal(h.el('pe-settings-dialog').open,false);
+});
+test('saving settings applies generation values only after a successful server save',async()=>{
+ const h=harness();h.ctx.cfg=cfg;h.run('populatePeConnection(cfg);state.initializing=false;showToast=()=>{}');
+ h.el('rng-temp').value='0.3';await h.run('openPeSettings()');h.el('rng-temp').value='0.8';h.el('ctx-input').value='16384';
+ h.ctx.fetch=async()=>({ok:false,json:async()=>({error:'Disk unavailable'})});
+ await h.run('savePeConnection()');
+ assert.equal(h.run('buildPayload([]).temperature'),0.3);assert.equal(h.el('pe-settings-dialog').open,true);
+ assert.match(h.el('pe-connection-feedback').textContent,/Disk unavailable/);
+ h.ctx.fetch=async()=>reply(cfg);await h.run('savePeConnection()');
+ assert.equal(h.run('buildPayload([]).temperature'),0.8);assert.equal(h.run('state.maxContext'),16384);
+ assert.equal(h.el('pe-settings-dialog').open,false);assert.equal(h.run('peSettingsSnapshot'),null);
+ assert.equal(JSON.parse(h.storage.get('prompt-engineer-v3-prefs')).temperature,'0.8');
+});
+test('model detection changes only the dialog draft and is discarded by cancel',async()=>{
+ const h=harness();h.ctx.cfg=cfg;h.run('populatePeConnection(cfg);showToast=()=>{}');
+ h.el('ctx-input').value='8192';h.el('img-max-dim').value='1024';await h.run('openPeSettings()');
+ h.ctx.fetch=async()=>reply({data:[{id:'Qwen3-VL-test',context_length:32768}]});
+ await h.run('fetchModelInfo()');
+ assert.equal(h.el('pe-model').value,'Qwen3-VL-test');assert.equal(h.el('ctx-input').value,32768);
+ assert.equal(h.run('state.modelName'),'vendor/full-model');assert.equal(h.run('state.maxContext'),8192);
+ assert.equal(h.el('img-max-dim').value,'1024');assert.equal(h.storage.size,0);
+ h.run('closePeSettings()');assert.equal(h.el('pe-model').value,'');assert.equal(h.el('ctx-input').value,'8192');
+});
+const files = [
+ {id:'resource:Krea2/Cinematic.txt',title:'Cinematic',text:'Krea cinematic instructions',folder:'Krea2',mode:'rewrite'},
+ {id:'resource:ZIT/Cinematic.txt',title:'Cinematic',text:'ZIT cinematic instructions',folder:'ZIT',mode:'rewrite'},
+ {id:'resource:Krea2/Vision.txt',title:'Vision Illustration',text:'Image instructions',folder:'Krea2',mode:'vision'}
+];
+test('prompt files have distinct identities, explicit image mode and are not custom deletions',async()=>{
+ const h=harness();h.ctx.fetch=async()=>reply({prompts:files,warnings:[]});
+ await h.run('loadResourcePrompts(true)');
+ assert.equal(h.run('PROMPTS["resource:Krea2/Cinematic.txt"]'),'Krea cinematic instructions');
+ assert.equal(h.run('PROMPTS["resource:ZIT/Cinematic.txt"]'),'ZIT cinematic instructions');
+ h.el('sys-prompt-select').value='resource:Krea2/Vision.txt';assert.equal(h.run('getCurrentMode()'),'vision');
+ h.run('deleteCurrentPrompt()');assert.equal(h.run('PROMPTS["resource:Krea2/Vision.txt"]'),'Image instructions');
+});
+test('search and folder browsing keep the selected prompt and editor draft',async()=>{
+ const h=harness();h.ctx.fetch=async()=>reply({prompts:files,warnings:[]});await h.run('loadResourcePrompts(true)');
+ h.run('rebuildDropdown("resource:Krea2/Cinematic.txt")');h.el('sys-prompt-preview').value='Hand edited';
+ h.el('pe-prompt-folder').value='folder:ZIT';h.el('pe-prompt-search').value='no match';h.run('renderPePromptOptions()');
+ assert.equal(h.el('sys-prompt-select').value,'resource:Krea2/Cinematic.txt');
+ assert.equal(h.run('getActiveSystemPrompt()'),'Hand edited');assert.match(h.el('pe-catalog-status').textContent,/No matching/);
+});
+test('refresh preserves edited text and chat, including a removed selected file',async()=>{
+ const h=harness();h.ctx.fetch=async()=>reply({prompts:files,warnings:[]});await h.run('loadResourcePrompts(true)');
+ h.run('rebuildDropdown("resource:Krea2/Cinematic.txt");state.history=[{role:"user",content:"Previous"}]');
+ h.el('sys-prompt-preview').value='Hand edited';
+ h.ctx.fetch=async()=>reply({prompts:[],warnings:[]});await h.run('loadResourcePrompts(false)');
+ assert.equal(h.run('getActiveSystemPrompt()'),'Hand edited');assert.equal(h.run('state.history.length'),1);
+ assert.equal(h.run('PROMPT_META["resource:Krea2/Cinematic.txt"].source'),'missing');
+ await h.run('loadResourcePrompts(false)');
+ assert.equal(h.run('PROMPT_META["resource:Krea2/Cinematic.txt"].source'),'missing');
+ h.ctx.fetch=async()=>{throw Error('Offline')};await h.run('loadResourcePrompts(false)');
+ assert.equal(h.run('getActiveSystemPrompt()'),'Hand edited');assert.match(h.el('pe-catalog-status').textContent,/unavailable/);
+});
+test('file selection and an edited system prompt restore after catalog loading',async()=>{
+ const h=harness({'prompt-engineer-v3-prefs':JSON.stringify({sys:files[0].id,systemPromptDraft:'Saved edit',generationOverridesVersion:1})});
+ h.ctx.fetch=async()=>reply({prompts:files,warnings:[]});await h.run('loadResourcePrompts(true)');
+ h.run('rebuildDropdown(storedPromptName());restoreState()');
+ assert.equal(h.el('sys-prompt-select').value,files[0].id);assert.equal(h.run('getActiveSystemPrompt()'),'Saved edit');
+});
+
+test('removed file restores its saved editor draft and vision mode after reopening',()=>{
+ const h=harness({'prompt-engineer-v3-prefs':JSON.stringify({sys:'resource:Krea2/Missing.txt',systemPromptDraft:'Kept text',systemPromptMode:'vision',generationOverridesVersion:1})});
+ h.run('restoreMissingResourcePrompt();rebuildDropdown(storedPromptName());restoreState()');
+ assert.equal(h.run('getCurrentMode()'),'vision');assert.equal(h.run('getActiveSystemPrompt()'),'Kept text');
+ assert.equal(h.run('PROMPT_META[els.sysSelect.value].source'),'missing');
 });

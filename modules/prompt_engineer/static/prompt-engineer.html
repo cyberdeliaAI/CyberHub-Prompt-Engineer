@@ -92,6 +92,43 @@
 
     #drop-overlay.active { display:flex; }
     #drop-overlay { transition: opacity 0.15s ease; }
+
+    /* Workspace controls use plain CSS so bundled/offline Tailwind stays sufficient. */
+    .pe-connection-card { display:flex; align-items:center; gap:10px; width:100%; padding:12px; border:1px solid var(--border, #35353a); border-radius:9px; background:var(--bg-card, #18181b); color:var(--text, #ddd); text-align:left; cursor:pointer; }
+    .pe-connection-card:hover { border-color:var(--accent, #ef4444); }
+    .pe-connection-copy { display:flex; flex:1; min-width:0; flex-direction:column; gap:5px; font-size:11px; }
+    .pe-connection-copy strong { font-size:12px; color:var(--text-bright, #fff); }
+    #pe-connection-summary, #pe-connection-model { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-dim, #aaa); }
+    .pe-connection-dot { width:7px; height:7px; border-radius:50%; background:var(--accent, #ef4444); flex-shrink:0; }
+    .pe-label { display:block; font-size:11px; color:var(--text-dim, #aaa); }
+    .pe-note { font-size:11px; line-height:1.5; color:var(--text-dim, #aaa); overflow-wrap:anywhere; }
+    .pe-search-row { display:flex; gap:6px; }
+    .pe-search-row input { min-width:0; }
+    #sys-prompt-preview { resize:vertical; min-height:150px; max-height:55vh; }
+    .pe-image-settings summary { cursor:pointer; color:var(--text-dim, #aaa); font-size:11px; padding:6px 0; }
+    .pe-image-settings > div { margin-top:12px; }
+    .pe-settings-dialog { margin:auto; padding:0; width:min(620px, calc(100vw - 32px)); max-width:none; max-height:calc(100dvh - 32px); border:1px solid var(--border, #38383d); border-radius:14px; background:var(--bg-panel, #18181b); color:var(--text, #ddd); box-shadow:0 24px 80px #0008; }
+    .pe-settings-dialog::backdrop { background:#000a; backdrop-filter:blur(3px); }
+    .pe-settings-dialog { --text-secondary:var(--text, #ddd); --text-muted:var(--text-dim, #aaa); }
+    .pe-settings-dialog form { display:flex; flex-direction:column; max-height:calc(100dvh - 34px); }
+    .pe-dialog-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:20px 24px; border-bottom:1px solid var(--border, #38383d); }
+    .pe-dialog-header h2 { font-size:17px; font-weight:600; color:var(--text-bright, #fff); }
+    .pe-dialog-header p { font-size:12px; color:var(--text-dim, #aaa); margin-top:5px; }
+    .pe-dialog-body { padding:22px 24px; overflow:auto; min-height:0; }
+    .pe-dialog-body section + section { margin-top:24px; padding-top:20px; border-top:1px solid var(--border, #38383d); }
+    .pe-settings-dialog [hidden] { display:none !important; }
+    .pe-dialog-body label { color:var(--text, #ddd); }
+    .pe-dialog-body p { color:var(--text-dim, #aaa); line-height:1.5; margin-top:6px; }
+    .pe-dialog-body .input-dark { padding:9px 11px; }
+    .pe-dialog-body h3 { margin-bottom:14px; }
+    .pe-dialog-body section > div { margin-top:14px; }
+    .pe-dialog-footer { padding:16px 24px; border-top:1px solid var(--border, #38383d); }
+    .pe-dialog-footer > div { display:flex; justify-content:flex-end; gap:8px; margin-top:10px; }
+    .pe-dialog-footer button { padding:9px 14px; font-size:11px; }
+    #pe-save-connection.pe-primary { background:var(--accent, #c22) !important; color:#fff !important; }
+    .pe-settings-dialog button:disabled { opacity:.5; cursor:wait; }
+    #main-area { min-width:0; }
+    @media (max-width:767px) { #sidebar { height:100%; max-width:340px; } #main-area > header { gap:8px; padding:0 12px; } #main-area > header > div { min-width:0; gap:6px; } #main-area > header > div > span { font-size:9px; letter-spacing:0; } .pe-dialog-body { padding:16px; } }
   </style>
 </head>
 
@@ -112,54 +149,37 @@
 
         <div id="settings-panel" class="p-5 space-y-6 flex-1 overflow-y-auto">
 
-          <!-- CONNECTION -->
+          <button id="pe-connection-trigger" class="pe-connection-card" type="button" onclick="openPeSettings()" aria-haspopup="dialog" aria-controls="pe-settings-dialog">
+            <span class="pe-connection-dot" aria-hidden="true"></span>
+            <span class="pe-connection-copy"><strong>Connection</strong><span id="pe-connection-summary">Loading connection…</span><span id="pe-connection-model">Server default</span></span>
+            <span aria-hidden="true">›</span>
+          </button>
+
+          <!-- SYSTEM PROMPT -->
           <section class="space-y-3">
-            <h3 class="text-[10px] font-bold uppercase tracking-widest" style="color:var(--text-muted)">Connection</h3>
-            <div>
-              <label for="backend-select" class="text-xs block mb-1" style="color:var(--text-secondary)">Backend API</label>
-              <select id="backend-select" class="input-dark"><option value="lmstudio">OpenAI-compatible (LM Studio, oMLX, …)</option></select>
-            </div>
-            <div id="pe-connection-controls" hidden>
-              <label for="pe-connection-mode" class="text-xs block mb-1">Connection source</label>
-              <select id="pe-connection-mode" class="input-dark" onchange="updatePeConnectionMode()"><option value="custom">Own connection</option><option value="shared">Central connection</option></select>
-              <p id="pe-connection-note" class="text-xs mt-1"></p>
-              <a id="pe-central-link" href="/settings#ai-connection" class="text-xs">Manage central AI connection</a>
-            </div>
-            <div id="pe-address-field">
-              <label for="ip-input" class="text-xs block mb-1" style="color:var(--text-secondary)">Server Address</label>
-              <input type="text" id="ip-input" value="localhost:1234" class="input-dark" placeholder="localhost:1234">
-            </div>
-            <div id="pe-api-key-field">
-              <label for="pe-api-key" class="text-xs block mb-1">API key (optional)</label>
-              <input id="pe-api-key" class="input-dark" type="password" autocomplete="new-password" spellcheck="false" placeholder="Only if your server requires a key">
-              <label class="text-xs"><input id="pe-clear-api-key" type="checkbox"> Remove saved API key</label>
-              <p class="text-xs mt-1">Leave blank to keep the saved key. A different server address clears it unless you enter a new key.</p>
-            </div>
-            <div id="pe-transport-controls" hidden>
-              <div id="pe-location-field"><label for="pe-transport" class="text-xs block mb-1">Connect from</label>
-              <select id="pe-transport" class="input-dark"><option value="browser">Browser computer</option><option value="hub">CyberHub computer</option></select>
-              <p class="text-xs mt-1">localhost refers to the selected computer. Browser connections send the API key through this browser.</p></div>
-              <label for="pe-model" class="text-xs block mt-2 mb-1">Model override for Prompt Engineer</label>
-              <input id="pe-model" class="input-dark" placeholder="Server default" spellcheck="false">
-              <button id="pe-save-connection" class="btn-action mt-2" onclick="savePeConnection()">Save connection</button>
-              <p id="pe-connection-feedback" class="text-xs mt-1" role="status"></p>
-            </div>
-            <div>
-              <label class="text-xs block mb-1" style="color:var(--text-secondary)">Detected Model</label>
-              <div id="model-name-display" class="text-[10px] font-mono break-all bg-black/20 p-2 rounded border border-white/5 leading-tight" style="color:var(--text-muted)">Unknown</div>
-            </div>
-            <div class="flex items-end justify-between pt-1 gap-2">
-              <div class="flex flex-col">
-                <label for="ctx-input" class="text-xs" style="color:var(--text-secondary)">Context Limit</label>
-                <input type="number" id="ctx-input" value="8192" min="1024" max="131072" step="1024" class="input-dark text-[10px] font-mono w-24 mt-0.5" aria-label="Context window size">
+            <div class="flex justify-between items-center">
+              <h3 class="text-[10px] font-bold uppercase tracking-widest" style="color:var(--text-muted)">System Prompt</h3>
+              <div class="flex gap-2">
+                <button id="add-prompt-btn" class="text-[10px] text-red-400 hover:text-red-300 flex items-center gap-1" title="Create custom prompt"><i data-feather="plus-circle" class="w-3 h-3"></i> Add</button>
+                <button id="delete-prompt-btn" class="hidden text-[10px] text-zinc-500 hover:text-red-500 flex items-center gap-1 transition" title="Delete custom prompt"><i data-feather="trash-2" class="w-3 h-3"></i> Del</button>
               </div>
-              <button id="derive-ctx-btn" class="btn-action flex-1 text-center py-2 bg-white/5" aria-label="Detect model">Detect Model</button>
+            </div>
+            <label for="pe-prompt-folder" class="pe-label">Collection</label>
+            <select id="pe-prompt-folder" class="input-dark"></select>
+            <div class="pe-search-row"><input id="pe-prompt-search" class="input-dark" type="search" placeholder="Search prompts…" aria-label="Search prompts in this collection"><button id="pe-refresh-prompts" class="btn-action" type="button" title="Reload prompt files from resources">Refresh</button></div>
+            <p id="pe-catalog-status" class="pe-note" role="status"></p>
+            <select id="sys-prompt-select" class="input-dark" aria-label="Select system prompt"></select>
+            <div id="prompt-mode-badge" class="text-[9px] uppercase tracking-widest font-bold px-2 py-1 rounded mt-1 mb-1 inline-block" style="color:var(--text-muted); background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);"></div>
+            <div class="relative group">
+              <textarea id="sys-prompt-preview" rows="10" class="input-dark text-[10px] resize-none leading-relaxed font-mono" style="color:var(--text-secondary)" aria-label="System prompt (editable)"></textarea>
+              <button id="copy-sys-btn" class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 bg-white/5 hover:bg-white/10 rounded text-zinc-400 transition" title="Copy prompt"><i data-feather="copy" class="w-3 h-3"></i></button>
+              <div class="text-[9px] mt-1" style="color:var(--text-muted)">Editable — modify freely or pick a preset above to reset.</div>
             </div>
           </section>
 
           <!-- IMAGE PREPROCESSING -->
-          <section class="space-y-3">
-            <h3 class="text-[10px] font-bold uppercase tracking-widest" style="color:var(--text-muted)">Image Preprocessing</h3>
+          <details class="pe-image-settings">
+            <summary>Image preprocessing</summary>
             <div class="flex items-center gap-2">
               <input type="checkbox" id="img-send-original" class="accent-red-500 w-3.5 h-3.5 cursor-pointer">
               <label for="img-send-original" class="text-xs cursor-pointer" style="color:var(--text-secondary)">Send original (no resize)</label>
@@ -176,54 +196,7 @@
                 </div>
               </div>
             </div>
-          </section>
-
-          <!-- SYSTEM PROMPT -->
-          <section class="space-y-3">
-            <div class="flex justify-between items-center">
-              <h3 class="text-[10px] font-bold uppercase tracking-widest" style="color:var(--text-muted)">System Prompt</h3>
-              <div class="flex gap-2">
-                <button id="add-prompt-btn" class="text-[10px] text-red-400 hover:text-red-300 flex items-center gap-1" title="Create custom prompt"><i data-feather="plus-circle" class="w-3 h-3"></i> Add</button>
-                <button id="delete-prompt-btn" class="hidden text-[10px] text-zinc-500 hover:text-red-500 flex items-center gap-1 transition" title="Delete custom prompt"><i data-feather="trash-2" class="w-3 h-3"></i> Del</button>
-              </div>
-            </div>
-            <select id="sys-prompt-select" class="input-dark" aria-label="Select system prompt"></select>
-            <div id="prompt-mode-badge" class="text-[9px] uppercase tracking-widest font-bold px-2 py-1 rounded mt-1 mb-1 inline-block" style="color:var(--text-muted); background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);"></div>
-            <div class="relative group">
-              <textarea id="sys-prompt-preview" rows="5" class="input-dark text-[10px] resize-none leading-relaxed font-mono" style="color:var(--text-secondary)" aria-label="System prompt (editable)"></textarea>
-              <button id="copy-sys-btn" class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 bg-white/5 hover:bg-white/10 rounded text-zinc-400 transition" title="Copy prompt"><i data-feather="copy" class="w-3 h-3"></i></button>
-              <div class="text-[9px] mt-1" style="color:var(--text-muted)">Editable — modify freely or pick a preset above to reset.</div>
-            </div>
-          </section>
-
-          <!-- GENERATION SETTINGS -->
-          <section class="space-y-4 pb-4">
-            <div class="flex items-center justify-between gap-2">
-              <h3 class="text-[10px] font-bold uppercase tracking-widest" style="color:var(--text-muted)">Generation Overrides</h3>
-              <button id="clear-generation-settings" class="text-[10px] text-red-400 hover:text-red-300 transition" title="Let LM Studio control all generation settings">Clear overrides</button>
-            </div>
-            <p class="text-[10px] leading-relaxed" style="color:var(--text-muted)">Leave a field blank to use the corresponding LM Studio setting.</p>
-            <div class="space-y-1">
-              <div class="flex justify-between text-xs font-mono" style="color:var(--text-secondary)"><label for="rng-temp">Temperature</label><span id="val-temp" class="text-red-400">LM Studio</span></div>
-              <input type="number" inputmode="decimal" id="rng-temp" min="0" max="2" step="0.05" value="" placeholder="LM Studio default" class="input-dark text-xs font-mono">
-            </div>
-            <div class="space-y-1">
-              <div class="flex justify-between text-xs font-mono" style="color:var(--text-secondary)"><label for="rng-topp">Top P</label><span id="val-topp" class="text-red-400">LM Studio</span></div>
-              <input type="number" inputmode="decimal" id="rng-topp" min="0" max="1" step="0.01" value="" placeholder="LM Studio default" class="input-dark text-xs font-mono">
-            </div>
-            <div class="space-y-1">
-              <div class="flex justify-between text-xs font-mono" style="color:var(--text-secondary)"><label for="rng-maxtokens">Max Tokens</label><span id="val-maxtokens" class="text-red-400">LM Studio</span></div>
-              <input type="number" inputmode="numeric" id="rng-maxtokens" min="1" max="131072" step="1" value="" placeholder="LM Studio default" class="input-dark text-xs font-mono">
-            </div>
-            <div class="space-y-1">
-              <div class="flex justify-between text-xs font-mono" style="color:var(--text-secondary)"><label for="rng-topk">Top K</label><span id="val-topk" class="text-red-400">LM Studio</span></div>
-              <input type="number" inputmode="numeric" id="rng-topk" min="0" max="1000" step="1" value="" placeholder="LM Studio default" class="input-dark text-xs font-mono">
-            </div>
-            <div class="space-y-1">
-              <div class="flex justify-between text-xs font-mono" style="color:var(--text-secondary)"><label for="rng-presence">Presence Penalty</label><span id="val-presence" class="text-red-400">LM Studio</span></div>
-              <input type="number" inputmode="decimal" id="rng-presence" min="-2" max="2" step="0.1" value="" placeholder="LM Studio default" class="input-dark text-xs font-mono">
-            </div>
-          </section>
+          </details>
 
           <!-- BOTTOM ACTIONS -->
           <div class="pt-4 border-t border-white/5 space-y-3">
@@ -258,6 +231,7 @@
             <span class="text-xs font-semibold uppercase tracking-widest" style="color:var(--text-muted)">Chat & Vision Output</span>
           </div>
           <div class="flex items-center gap-2">
+            <button id="pe-settings-link" class="header-btn" type="button" onclick="openPeSettings()" aria-haspopup="dialog" aria-controls="pe-settings-dialog">Settings</button>
             <button id="regen-btn" class="header-btn hidden" title="Regenerate last response"><i data-feather="refresh-cw" class="w-3 h-3"></i></button>
             <button id="edit-last-btn" class="header-btn hidden" title="Edit last prompt"><i data-feather="edit-2" class="w-3 h-3"></i></button>
             <div class="text-[10px] uppercase tracking-widest" style="color:var(--text-muted)" id="status-indicator" role="status" aria-live="polite">Ready</div>
@@ -293,6 +267,89 @@
 
   <div id="toast-container" aria-live="polite"></div>
 
+  <dialog id="pe-settings-dialog" class="pe-settings-dialog" aria-labelledby="pe-settings-title" aria-describedby="pe-settings-description">
+    <form id="pe-settings-form" onsubmit="event.preventDefault(); savePeConnection()">
+      <header class="pe-dialog-header"><div><h2 id="pe-settings-title">Prompt Engineer settings</h2><p id="pe-settings-description">Connect your model and adjust generation.</p></div><button type="button" class="btn-action" onclick="closePeSettings()" aria-label="Close settings">×</button></header>
+      <div class="pe-dialog-body">
+          <!-- CONNECTION -->
+          <section class="space-y-3">
+            <h3 class="text-[10px] font-bold uppercase tracking-widest" style="color:var(--text-muted)">Connection</h3>
+            <div>
+              <label for="backend-select" class="text-xs block mb-1" style="color:var(--text-secondary)">Backend API</label>
+              <select id="backend-select" class="input-dark"><option value="lmstudio">OpenAI-compatible (LM Studio, oMLX, …)</option></select>
+            </div>
+            <div id="pe-connection-controls" hidden>
+              <label for="pe-connection-mode" class="text-xs block mb-1">Connection source</label>
+              <select id="pe-connection-mode" class="input-dark" onchange="updatePeConnectionMode()"><option value="custom">Own connection</option><option value="shared">Central connection</option></select>
+              <p id="pe-connection-note" class="text-xs mt-1"></p>
+              <a id="pe-central-link" href="/settings#ai-connection" class="text-xs">Manage central AI connection</a>
+            </div>
+            <div id="pe-address-field">
+              <label for="ip-input" class="text-xs block mb-1" style="color:var(--text-secondary)">Server Address</label>
+              <input type="text" id="ip-input" value="localhost:1234" class="input-dark" placeholder="localhost:1234">
+            </div>
+            <div id="pe-api-key-field">
+              <label for="pe-api-key" class="text-xs block mb-1">API key (optional)</label>
+              <input id="pe-api-key" class="input-dark" type="password" autocomplete="new-password" spellcheck="false" placeholder="Only if your server requires a key">
+              <label class="text-xs"><input id="pe-clear-api-key" type="checkbox"> Remove saved API key</label>
+              <p class="text-xs mt-1">Leave blank to keep the saved key. A different server address clears it unless you enter a new key.</p>
+            </div>
+            <div id="pe-transport-controls" hidden>
+              <div id="pe-location-field"><label for="pe-transport" class="text-xs block mb-1">Connect from</label>
+              <select id="pe-transport" class="input-dark"><option value="browser">Browser computer</option><option value="hub">CyberHub computer</option></select>
+              <p class="text-xs mt-1">localhost refers to the selected computer. Browser connections send the API key through this browser.</p></div>
+              <label for="pe-model" class="text-xs block mt-2 mb-1">Model override for Prompt Engineer</label>
+              <input id="pe-model" class="input-dark" placeholder="Server default" spellcheck="false">
+
+
+            </div>
+            <div hidden>
+              <label class="text-xs block mb-1" style="color:var(--text-secondary)">Detected Model</label>
+              <div id="model-name-display" class="text-[10px] font-mono break-all bg-black/20 p-2 rounded border border-white/5 leading-tight" style="color:var(--text-muted)">Unknown</div>
+            </div>
+            <div class="flex items-end justify-between pt-1 gap-2">
+              <div class="flex flex-col">
+                <label for="ctx-input" class="text-xs" style="color:var(--text-secondary)">Context Limit</label>
+                <input type="number" id="ctx-input" value="8192" min="1024" max="131072" step="1" class="input-dark text-[10px] font-mono w-24 mt-0.5" aria-label="Context window size">
+              </div>
+              <button type="button" id="derive-ctx-btn" class="btn-action flex-1 text-center py-2 bg-white/5" aria-label="Detect model">Detect Model</button>
+            </div>
+          </section>
+
+          <!-- GENERATION SETTINGS -->
+          <section class="space-y-4 pb-4">
+            <div class="flex items-center justify-between gap-2">
+              <h3 class="text-[10px] font-bold uppercase tracking-widest" style="color:var(--text-muted)">Generation Overrides</h3>
+              <button type="button" id="clear-generation-settings" class="text-[10px] text-red-400 hover:text-red-300 transition" title="Let server control all generation settings">Clear overrides</button>
+            </div>
+            <p class="text-[10px] leading-relaxed" style="color:var(--text-muted)">Leave a field blank to use the corresponding server setting.</p>
+            <div class="space-y-1">
+              <div class="flex justify-between text-xs font-mono" style="color:var(--text-secondary)"><label for="rng-temp">Temperature</label><span id="val-temp" class="text-red-400">server</span></div>
+              <input type="number" inputmode="decimal" id="rng-temp" min="0" max="2" step="0.05" value="" placeholder="server default" class="input-dark text-xs font-mono">
+            </div>
+            <div class="space-y-1">
+              <div class="flex justify-between text-xs font-mono" style="color:var(--text-secondary)"><label for="rng-topp">Top P</label><span id="val-topp" class="text-red-400">server</span></div>
+              <input type="number" inputmode="decimal" id="rng-topp" min="0" max="1" step="0.01" value="" placeholder="server default" class="input-dark text-xs font-mono">
+            </div>
+            <div class="space-y-1">
+              <div class="flex justify-between text-xs font-mono" style="color:var(--text-secondary)"><label for="rng-maxtokens">Max Tokens</label><span id="val-maxtokens" class="text-red-400">server</span></div>
+              <input type="number" inputmode="numeric" id="rng-maxtokens" min="1" max="131072" step="1" value="" placeholder="server default" class="input-dark text-xs font-mono">
+            </div>
+            <div class="space-y-1">
+              <div class="flex justify-between text-xs font-mono" style="color:var(--text-secondary)"><label for="rng-topk">Top K</label><span id="val-topk" class="text-red-400">server</span></div>
+              <input type="number" inputmode="numeric" id="rng-topk" min="0" max="1000" step="1" value="" placeholder="server default" class="input-dark text-xs font-mono">
+            </div>
+            <div class="space-y-1">
+              <div class="flex justify-between text-xs font-mono" style="color:var(--text-secondary)"><label for="rng-presence">Presence Penalty</label><span id="val-presence" class="text-red-400">server</span></div>
+              <input type="number" inputmode="decimal" id="rng-presence" min="-2" max="2" step="0.1" value="" placeholder="server default" class="input-dark text-xs font-mono">
+            </div>
+          </section>
+
+      </div>
+      <footer class="pe-dialog-footer"><p id="pe-connection-feedback" class="pe-note" role="status"></p><div><button type="button" class="btn-action" onclick="closePeSettings()">Cancel</button><button id="pe-save-connection" type="submit" class="btn-action pe-primary">Save settings</button></div></footer>
+    </form>
+  </dialog>
+
   <!-- ADD PROMPT MODAL -->
   <div id="modal-overlay" class="modal-overlay">
     <div class="modal-box">
@@ -307,6 +364,7 @@
           <select id="new-prompt-mode" class="input-dark text-sm mt-1 p-2">
             <option value="vision">Vision (requires image)</option>
             <option value="generate">Generation (text only)</option>
+            <option value="rewrite">Rewrite (text only)</option>
           </select>
         </div>
         <div>
@@ -340,7 +398,7 @@ const CONFIG = {
    PROMPT REGISTRY
    ========================================= */
 const PROMPT_REGISTRY = [
- 
+
   { name: "SDXL: Caption from Image", mode: "vision", rec: 512, text: `You are a prompt engineering system specialized in Stable Diffusion XL (SDXL).
 
 Your task is to analyze the provided image and produce an SDXL-optimized prompt that faithfully recreates its visual content.
@@ -994,7 +1052,7 @@ unless the user explicitly included them.
 
 Prefer concrete visual information:
 materials, lighting behavior, lens behavior, surface detail, atmosphere, texture.
-</ANTI_GENERIC_RULES>` }, 
+</ANTI_GENERIC_RULES>` },
   { name: "Z-Image Prompt Rewriter and Converter", mode: "rewrite", rec: 768, text: `<Z_IMAGE_REWRITER_ROLE>
 You are Prompt Guidance for Z-Image operating in "prompt rewrite / prompt conversion" mode.
 
@@ -1459,12 +1517,12 @@ Do not explain the conversion unless the user asks.` }
 ];
 
 // Build runtime maps
-const PROMPTS = {};
-const PROMPT_META = {};
+const PROMPTS = Object.create(null);
+const PROMPT_META = Object.create(null);
 const BUILTIN_NAMES = [];
 PROMPT_REGISTRY.forEach(p => {
   PROMPTS[p.name] = p.text;
-  PROMPT_META[p.name] = { mode: p.mode, rec: p.rec };
+  PROMPT_META[p.name] = { mode: p.mode, rec: p.rec, source: 'builtin' };
   BUILTIN_NAMES.push(p.name);
 });
 const DEFAULT_SELECTED = "Z-Image: Prompt from Description";
@@ -1604,6 +1662,54 @@ function closeSidebar() { els.sidebar.classList.add('-translate-x-full'); els.si
    ========================================= */
 let peConnection = null;
 let peConnectionReady = Promise.resolve();
+let peSettingsSnapshot = null;
+let peSettingsBusy = false;
+let peStandaloneKey = '';
+const PE_DRAFT_IDS = ['ip-input', 'backend-select', 'ctx-input', 'pe-model', 'rng-temp', 'rng-topp', 'rng-maxtokens', 'rng-topk', 'rng-presence'];
+function peAppliedValue(element) { return peSettingsSnapshot?.values[element.id] ?? element.value; }
+function updatePeConnectionSummary() {
+  const cfg = peConnection;
+  const source = cfg?.connection_mode === 'shared' ? 'Central' : 'Own';
+  const computer = cfg?.transport === 'hub' ? 'CyberHub computer' : 'Browser computer';
+  const summary = document.getElementById('pe-connection-summary');
+  summary.textContent = cfg?.connection_error ? 'Connection needs attention' : source + ' · ' + computer;
+  summary.title = cfg?.connection_error || cfg?.api_url || normalizePeApiUrl(peAppliedValue(els.ip));
+  const model = document.getElementById('pe-connection-model');
+  model.textContent = cfg?.model || state.modelName || 'Server default';
+  model.title = model.textContent;
+}
+async function openPeSettings() {
+  const dialog = document.getElementById('pe-settings-dialog');
+  if (dialog.open || peSettingsBusy) return;
+  try { await peConnectionReady; } catch(e) { peConnectionFeedback(e.message); }
+  if (dialog.open) return;
+  if (peConnection) populatePeConnection(peConnection);
+  else document.getElementById('pe-model').value = state.modelName === 'Unknown' ? '' : state.modelName;
+  peSettingsSnapshot = {values:Object.fromEntries(PE_DRAFT_IDS.map(id => [id, document.getElementById(id).value]))};
+  peConnectionFeedback(peConnection?.connection_error || '');
+  dialog.showModal();
+}
+function closePeSettings() {
+  if (peSettingsBusy) return;
+  if (peSettingsSnapshot) {
+    for (const [id, value] of Object.entries(peSettingsSnapshot.values)) document.getElementById(id).value = value;
+    peSettingsSnapshot = null;
+  }
+  if (peConnection) populatePeConnection(peConnection);
+  document.getElementById('pe-api-key').value = '';
+  document.getElementById('pe-clear-api-key').checked = false;
+  updateGenerationSettingDisplays();
+  document.getElementById('pe-settings-dialog').close();
+}
+function setPeSettingsBusy(busy) {
+  peSettingsBusy = busy;
+  document.querySelectorAll('#pe-settings-form input, #pe-settings-form select, #pe-settings-form button').forEach(el => {el.disabled = busy;});
+  if (!busy && peConnection) {
+    document.getElementById('pe-connection-mode').disabled = !peConnection.central_available;
+    updatePeConnectionMode(false);
+  }
+}
+
 
 function normalizePeApiUrl(value) {
   let address = String(value || 'http://localhost:1234').trim();
@@ -1612,7 +1718,7 @@ function normalizePeApiUrl(value) {
   if (!/\/v1$/i.test(address)) address += '/v1';
   return address;
 }
-function baseUrl() { return normalizePeApiUrl(peConnection?.api_url || els.ip.value); }
+function baseUrl() { return normalizePeApiUrl(peConnection?.api_url || peAppliedValue(els.ip)); }
 function peConnectionFeedback(message) { document.getElementById('pe-connection-feedback').textContent=message; }
 function populatePeConnection(cfg) {
   document.getElementById('pe-api-key').value = '';
@@ -1630,6 +1736,7 @@ function populatePeConnection(cfg) {
   state.modelName = cfg.model || '';
   els.modelDisplay.textContent = cfg.model || 'Server default';
   updatePeConnectionMode(false);
+  updatePeConnectionSummary();
 }
 function updatePeConnectionMode(switched=true) {
   const shared = document.getElementById('pe-connection-mode').value === 'shared';
@@ -1680,7 +1787,7 @@ async function peBrowserHeaders(cfg, saved=false) {
 
 async function loadPeConnection() {
   const response = await fetch('/api/prompt-engineer/config', {cache:'no-store'});
-  if (response.status === 404) return; // Standalone page / older module hosting.
+  if (response.status === 404) { updatePeConnectionSummary(); return; } // Standalone page / older module hosting.
   const cfg = await response.json();
   if (!response.ok || cfg.error) throw new Error(cfg.error || 'Could not load connection');
   let legacy = {};
@@ -1708,19 +1815,35 @@ async function refreshPeConnection() {
   if (!response.ok || cfg.error || cfg.connection_error) throw new Error(cfg.error || cfg.connection_error || 'Could not refresh connection');
   peConnection = cfg; // Leave unsaved controls alone; generation uses the saved config.
   state.modelName = cfg.model || '';
+  updatePeConnectionSummary();
 }
 async function savePeConnection() {
-  const button = document.getElementById('pe-save-connection');
-  if (button.disabled) return;
-  button.disabled = true;
+  if (peSettingsBusy || !document.getElementById('pe-settings-form').reportValidity()) return;
+  const draft = peConnectionDraft();
+  if (!validateServer(draft.api_url)) { peConnectionFeedback('Use a valid HTTP or HTTPS server address.'); return; }
+  setPeSettingsBusy(true);
+  peConnectionFeedback('Saving settings…');
   try {
-    const response = await fetch('/api/prompt-engineer/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(peConnectionDraft())});
-    const cfg = await response.json();
-    if (!response.ok || cfg.error) throw new Error(cfg.error || 'Save failed');
-    populatePeConnection(cfg);
-    peConnectionFeedback('Connection saved.');
-  } catch(e) {peConnectionFeedback('Save failed: ' + e.message);}
-  finally {button.disabled = false;}
+    await peConnectionReady;
+    if (peConnection) {
+      const response = await fetch('/api/prompt-engineer/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(draft)});
+      const cfg = await response.json();
+      if (!response.ok || cfg.error) throw new Error(cfg.error || 'Save failed');
+      populatePeConnection(cfg);
+    } else {
+      state.modelName = draft.model;
+      if (Object.hasOwn(draft, 'api_key')) peStandaloneKey = draft.api_key;
+    }
+    state.maxContext = Number(els.ctxInput.value) || 8192;
+    peSettingsSnapshot = null;
+    document.getElementById('pe-api-key').value = '';
+    document.getElementById('pe-clear-api-key').checked = false;
+    saveState();
+    updatePeConnectionSummary();
+    document.getElementById('pe-settings-dialog').close();
+    showToast('Settings saved', 'success');
+  } catch(e) { peConnectionFeedback('Save failed: ' + e.message); }
+  finally { setPeSettingsBusy(false); }
 }
 
 /* =========================================
@@ -1866,7 +1989,7 @@ function applyPromptMode(name) {
     clearAttachment();
   }
   feather.replace();
-  els.maxtokens.placeholder = `LM Studio default (suggested ${meta.rec})`;
+  els.maxtokens.placeholder = `Server default (suggested ${meta.rec})`;
   updateGenerationSettingDisplay('maxtokens', els.maxtokens);
 }
 
@@ -1914,12 +2037,12 @@ function updateActionButtons() {
 
 function updateDeleteBtn() {
   const cur = els.sysSelect.value;
-  els.deletePromptBtn.classList.toggle('hidden', BUILTIN_NAMES.includes(cur));
+  els.deletePromptBtn.classList.toggle('hidden', PROMPT_META[cur]?.source !== 'custom');
 }
 
 function updateGenerationSettingDisplay(name, element) {
   const display = document.getElementById(`val-${name}`);
-  if (display) display.innerText = String(element?.value || '').trim() || 'LM Studio';
+  if (display) display.innerText = String(element?.value || '').trim() || 'Server default';
 }
 
 function updateGenerationSettingDisplays() {
@@ -1934,8 +2057,8 @@ function clearGenerationOverrides(notify = true) {
     element.value = '';
   });
   updateGenerationSettingDisplays();
-  saveQuickPrefs();
-  if (notify) showToast('LM Studio generation settings will be used', 'success');
+  if (!peSettingsSnapshot) saveQuickPrefs();
+  if (notify) peConnectionFeedback('Overrides cleared. Save settings to use server defaults.');
 }
 
 /* =========================================
@@ -1944,14 +2067,16 @@ function clearGenerationOverrides(notify = true) {
 function preferenceSnapshot() {
   return {
     generationOverridesVersion: 1,
-    ...(!peConnection ? {backend:els.backend?.value || 'lmstudio', ip:els.ip.value, modelName:state.modelName} : {}),
+    ...(!peConnection ? {backend:els.backend?.value || 'lmstudio', ip:peAppliedValue(els.ip), modelName:state.modelName} : {}),
     sys: els.sysSelect.value,
-    maxContext: parseInt(els.ctxInput.value, 10) || state.maxContext,
-    temperature: els.temp.value,
-    topP: els.topp.value,
-    maxTokens: els.maxtokens.value,
-    topK: els.topk.value,
-    presence: els.presence.value,
+    systemPromptDraft: els.sysPreview.value,
+    systemPromptMode: PROMPT_META[els.sysSelect.value]?.mode,
+    maxContext: state.maxContext,
+    temperature: peAppliedValue(els.temp),
+    topP: peAppliedValue(els.topp),
+    maxTokens: peAppliedValue(els.maxtokens),
+    topK: peAppliedValue(els.topk),
+    presence: peAppliedValue(els.presence),
     sendOriginal: els.imageSendOriginal.checked,
     imageMaxDim: els.imageMaxDim.value,
     imageQuality: els.imageQuality.value
@@ -2067,7 +2192,8 @@ function restoreState() {
     });
 
     applyPreferenceControls(values);
-    if (values.modelName) {
+    if (values.sys === els.sysSelect.value && typeof values.systemPromptDraft === 'string') els.sysPreview.value = values.systemPromptDraft;
+    if (values.modelName && !peConnection) {
       state.modelName = values.modelName;
       els.modelDisplay.innerText = values.modelName;
     }
@@ -2087,7 +2213,7 @@ function loadCustomPrompts() {
     for (const [name, data] of Object.entries(saved)) {
       if (!PROMPTS[name]) {
         PROMPTS[name] = data.text;
-        PROMPT_META[name] = { mode: data.mode || 'generate', rec: data.rec || 1024 };
+        PROMPT_META[name] = { mode: data.mode || 'generate', rec: data.rec || 1024, source: 'custom' };
       }
     }
   } catch(e) {}
@@ -2107,25 +2233,127 @@ function deleteCustomPrompt(name) {
   localStorage.setItem(CONFIG.customPromptsKey, JSON.stringify(saved));
 }
 
-function rebuildDropdown(selectName) {
-  els.sysSelect.innerHTML = '';
-  const vG = document.createElement('optgroup'); vG.label = '\u2500\u2500 Vision (Image Analysis) \u2500\u2500';
-  const gG = document.createElement('optgroup'); gG.label = '\u2500\u2500 Generation (Text-to-Prompt) \u2500\u2500';
-  const rG = document.createElement('optgroup'); rG.label = '\u2500\u2500 Rewrite (Prompt-to-Prompt) \u2500\u2500';
-  const cG = document.createElement('optgroup'); cG.label = '\u2500\u2500 Custom \u2500\u2500';
-  for (const name of Object.keys(PROMPTS).sort()) {
-    const opt = document.createElement('option'); opt.value = name; opt.innerText = name;
-    if (!BUILTIN_NAMES.includes(name)) cG.appendChild(opt);
-    else if (PROMPT_META[name]?.mode === 'vision') vG.appendChild(opt);
-    else if (PROMPT_META[name]?.mode === 'rewrite') rG.appendChild(opt);
-    else gG.appendChild(opt);
+let peSelectedPrompt = DEFAULT_SELECTED;
+let peCatalogLoading = false;
+function pePromptCollection(name) {
+  const meta = PROMPT_META[name];
+  if (meta?.source === 'resource') return 'folder:' + (meta.folder || '');
+  return meta?.source || 'builtin';
+}
+function peCollectionLabel(key) {
+  if (key.startsWith('folder:')) return key.slice(7) || 'Prompt files';
+  return {builtin:'Built-in prompts', custom:'My prompts', legacy:'Legacy prompts.json', missing:'Unavailable files'}[key] || key;
+}
+function pePromptTitle(name) { return PROMPT_META[name]?.title || name; }
+function rebuildPeCollections(selected) {
+  const folder = document.getElementById('pe-prompt-folder');
+  const previous = selected ?? folder.value;
+  folder.innerHTML = '';
+  const keys = [...new Set(Object.keys(PROMPTS).map(pePromptCollection))].sort((a,b) => peCollectionLabel(a).localeCompare(peCollectionLabel(b)));
+  for (const key of ['all', ...keys]) {
+    const option = document.createElement('option');
+    option.value = key;
+    const count = Object.keys(PROMPTS).filter(name => key === 'all' || pePromptCollection(name) === key).length;
+    option.textContent = (key === 'all' ? 'All collections' : peCollectionLabel(key)) + ' (' + count + ')';
+    folder.appendChild(option);
   }
-  if (vG.children.length) els.sysSelect.appendChild(vG);
-  if (gG.children.length) els.sysSelect.appendChild(gG);
-  if (rG.children.length) els.sysSelect.appendChild(rG);
-  if (cG.children.length) els.sysSelect.appendChild(cG);
-  if (selectName && PROMPTS[selectName]) els.sysSelect.value = selectName;
+  folder.value = keys.includes(previous) || previous === 'all' ? previous : 'builtin';
+}
+function renderPePromptOptions() {
+  const folder = document.getElementById('pe-prompt-folder').value;
+  const query = document.getElementById('pe-prompt-search').value.trim().toLocaleLowerCase();
+  const names = Object.keys(PROMPTS).filter(name => (folder === 'all' || pePromptCollection(name) === folder)
+    && pePromptTitle(name).toLocaleLowerCase().includes(query)).sort((a,b) => pePromptTitle(a).localeCompare(pePromptTitle(b)));
+  els.sysSelect.innerHTML = '';
+  const groups = new Map();
+  const add = (name, label) => {
+    if (!groups.has(label)) { const group = document.createElement('optgroup'); group.label = label; groups.set(label, group); els.sysSelect.appendChild(group); }
+    const option = document.createElement('option'); option.value = name; option.textContent = pePromptTitle(name);
+    groups.get(label).appendChild(option);
+  };
+  // Browsing/searching never changes the active instructions or clears a chat.
+  if (PROMPTS[peSelectedPrompt] && !names.includes(peSelectedPrompt)) add(peSelectedPrompt, 'Current prompt (outside this filter)');
+  for (const name of names) {
+    const mode = PROMPT_META[name]?.mode || 'generate';
+    const group = {vision:'Vision · image input', rewrite:'Rewrite · text input', generate:'Generate · text input'}[mode];
+    add(name, (folder === 'all' ? peCollectionLabel(pePromptCollection(name)) + ' / ' : '') + group);
+  }
+  els.sysSelect.value = peSelectedPrompt;
+  document.getElementById('pe-catalog-status').textContent = names.length ? names.length + ' prompts' : 'No matching prompts. Your current prompt is kept.';
+}
+function choosePePrompt(name) {
+  if (!PROMPTS[name]) return;
+  if (name !== peSelectedPrompt && state.history.length) {
+    state.history = []; renderChat(); showToast('Prompt changed — chat cleared', 'info');
+  }
+  peSelectedPrompt = name;
+  renderPePromptOptions();
   updateSysPreview();
+  saveQuickPrefs();
+}
+function rebuildDropdown(selectName) {
+  peSelectedPrompt = PROMPTS[selectName] ? selectName : DEFAULT_SELECTED;
+  document.getElementById('pe-prompt-search').value = '';
+  rebuildPeCollections(pePromptCollection(peSelectedPrompt));
+  renderPePromptOptions();
+  updateSysPreview();
+}
+async function loadResourcePrompts(initial = false) {
+  if (peCatalogLoading) return;
+  peCatalogLoading = true;
+  const button = document.getElementById('pe-refresh-prompts');
+  button.disabled = true;
+  const status = document.getElementById('pe-catalog-status');
+  status.textContent = 'Reading prompt folders…';
+  try {
+    const response = await fetchWithTimeout('/api/prompt-engineer/prompts', {cache:'no-store'}, 8000);
+    if (response.status === 404) return;
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.prompts)) throw new Error(data.error || 'Could not read prompt folders');
+    const selected = peSelectedPrompt;
+    const draft = els.sysPreview.value;
+    const previousText = PROMPTS[selected];
+    const previousMeta = PROMPT_META[selected];
+    for (const name of Object.keys(PROMPT_META)) {
+      if (['resource', 'missing'].includes(PROMPT_META[name].source)) { delete PROMPTS[name]; delete PROMPT_META[name]; }
+    }
+    for (const item of data.prompts) {
+      if (!item.id?.startsWith('resource:') || typeof item.text !== 'string' || !item.text.trim() || !['vision','rewrite','generate'].includes(item.mode)) continue;
+      // Namespaced paths keep identically named files in separate folders distinct.
+      PROMPTS[item.id] = item.text;
+      PROMPT_META[item.id] = {source:'resource', title:item.title, folder:item.folder, file:item.file, mode:item.mode, rec:1024};
+    }
+    if (!initial) {
+      if (!PROMPTS[selected] && ['resource', 'missing'].includes(previousMeta?.source)) {
+        PROMPTS[selected] = draft; PROMPT_META[selected] = {...previousMeta, source:'missing'};
+      }
+      rebuildPeCollections(); renderPePromptOptions();
+      // Keep a local edit or an ongoing conversation exactly as it was.
+      if (!state.history.length && draft === previousText && PROMPTS[selected]) {
+        els.sysPreview.value = PROMPTS[selected]; applyPromptMode(selected);
+      }
+      updateDeleteBtn(); saveQuickPrefs();
+    }
+    const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+    const missing = PROMPT_META[selected]?.source === 'missing';
+    status.textContent = missing ? 'Selected file was removed. Your editor draft is kept.' : data.prompts.length + ' prompt files loaded' + (warnings.length ? ' · ' + warnings.length + ' skipped (see details)' : '');
+    status.title = warnings.join('\n');
+  } catch(e) {
+    status.textContent = 'Prompt folders unavailable. Existing prompts are kept. ' + e.message;
+  } finally { peCatalogLoading = false; button.disabled = false; }
+}
+async function loadLegacyPrompts() {
+  try {
+    const response = await fetchWithTimeout('./prompts.json', {cache:'no-store'}, 5000);
+    if (!response.ok) return;
+    const data = await response.json();
+    if (!Array.isArray(data.prompts)) return;
+    for (const p of data.prompts) {
+      if (!p?.name || typeof p.text !== 'string' || !p.text.trim() || PROMPTS[p.name] || p.name.startsWith('resource:')) continue;
+      PROMPTS[p.name] = p.text;
+      PROMPT_META[p.name] = {mode:['vision','rewrite','generate'].includes(p.mode) ? p.mode : 'generate', rec:2048, source:'legacy'};
+    }
+  } catch(e) {}
 }
 
 /* =========================================
@@ -2235,13 +2463,15 @@ function deleteMessage(index) {
    FETCH MODEL INFO
    ========================================= */
 async function fetchModelInfo() {
+  if (peSettingsBusy) return;
   const addr = els.ip.value.trim();
   if (!validateServer(addr)) { showToast('Invalid server address', 'error'); return; }
+  setPeSettingsBusy(true);
   els.deriveCtxBtn.innerText = "Fetching...";
   els.deriveCtxBtn.classList.add("opacity-50");
   try {
     await peConnectionReady;
-    const draft = peConnection ? peConnectionDraft() : {api_url:baseUrl(), transport:'browser', ...peKeyDraft()};
+    const draft = peConnection ? peConnectionDraft() : {api_url:normalizePeApiUrl(els.ip.value), transport:'browser', ...peKeyDraft()};
     if (!draft.api_url) throw new Error('Save a central connection in Settings first.');
     const headers = draft.transport === 'hub' ? {} : peConnection ? await peBrowserHeaders(draft) : draft.api_key ? {Authorization:'Bearer ' + draft.api_key} : {};
     const res = draft.transport === 'hub'
@@ -2255,7 +2485,7 @@ async function fetchModelInfo() {
       document.getElementById('pe-model').value = name;
       peConnectionFeedback('Detected model. Save connection to use it.');
     }
-    state.modelName = name;
+    document.getElementById('pe-model').value = name;
     els.modelDisplay.innerText = name;
     els.modelDisplay.style.color = '#4ade80';
 
@@ -2263,23 +2493,22 @@ async function fetchModelInfo() {
     const modelData = data.data?.[0];
     const reportedCtx = modelData?.max_context_length || modelData?.context_length || modelData?.context_window;
     if (reportedCtx && reportedCtx > 0) {
-      state.maxContext = reportedCtx;
-      els.ctxInput.value = reportedCtx;
+      els.ctxInput.value = Math.min(131072, Math.max(1024, reportedCtx));
       showToast(`Detected: ${name} (ctx: ${reportedCtx})`, 'success');
     } else {
       els.ctxInput.value = state.maxContext;
       showToast(`Detected: ${name}`, 'success');
     }
-    applyModelPreset(name);
+
     els.deriveCtxBtn.innerText = "Updated";
     setTimeout(() => { els.deriveCtxBtn.innerText = "Detect Model"; }, 2000);
-    saveState();
   } catch (e) {
+    peConnectionFeedback('Detection failed: ' + e.message);
     showToast('Connection failed: ' + e.message, 'error');
     els.deriveCtxBtn.innerText = "Retry";
     els.modelDisplay.innerText = "Connection Failed";
     els.modelDisplay.style.color = '#ef4444';
-  } finally { els.deriveCtxBtn.classList.remove("opacity-50"); }
+  } finally { els.deriveCtxBtn.classList.remove("opacity-50"); setPeSettingsBusy(false); }
 }
 
 /* =========================================
@@ -2422,7 +2651,7 @@ function estimateVisionTokensFromMaxDim(maxDim) {
 }
 
 function optionalGenerationNumber(element, integer = false) {
-  const raw = String(element?.value ?? '').trim();
+  const raw = String(element ? peAppliedValue(element) : '').trim();
   if (!raw) return null;
   const value = integer ? parseInt(raw, 10) : Number(raw);
   return Number.isFinite(value) ? value : null;
@@ -2521,7 +2750,7 @@ function buildPayload(messages, minimal = false) {
 async function postChatCompletions(messages) {
   await refreshPeConnection();
   const endpoint = peConnection?.transport === 'hub' ? '/api/prompt-engineer/chat' : baseUrl() + '/chat/completions';
-  const headers = peConnection?.transport === 'hub' ? {} : peConnection ? await peBrowserHeaders(peConnection, true) : peKeyDraft().api_key ? {Authorization:'Bearer ' + peKeyDraft().api_key} : {};
+  const headers = peConnection?.transport === 'hub' ? {} : peConnection ? await peBrowserHeaders(peConnection, true) : peStandaloneKey ? {Authorization:'Bearer ' + peStandaloneKey} : {};
   const opts = (body) => ({
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
@@ -2578,23 +2807,6 @@ function extractDeltaText(parsed) {
   }
 
   return "";
-}
-
-/* =========================================
-   MODEL PRESET APPLICATOR
-   ========================================= */
-function applyModelPreset(modelName) {
-  const model = (modelName || "").toLowerCase();
-
-  if (/qwen.*vl|qwen-vl/.test(model)) {
-    if ((parseInt(els.ctxInput.value, 10) || 8192) < 8192) {
-      els.ctxInput.value = 8192;
-      state.maxContext = 8192;
-    }
-    const imgDimEl = document.getElementById('img-max-dim');
-    if (parseInt(imgDimEl.value, 10) > 512) imgDimEl.value = 512;
-    showToast(`Qwen-VL context and image preset applied`, 'success');
-  }
 }
 
 async function sendMessageCore(txt, img, skipUserAppend) {
@@ -2679,10 +2891,10 @@ function saveNewPrompt() {
   const mode = els.newPromptMode.value;
   const text = els.newPromptContent.value.trim();
   if (!name || !text) { showToast("Fill in both fields", "error"); return; }
-  if (PROMPTS[name]) { showToast("Name already exists", "error"); return; }
+  if (name.startsWith('resource:') || PROMPTS[name]) { showToast("Name already exists", "error"); return; }
   PROMPTS[name] = text;
   const rec = parseInt(els.maxtokens.value) || PROMPT_META[els.sysSelect.value]?.rec || 1024;
-  PROMPT_META[name] = { mode, rec };
+  PROMPT_META[name] = { mode, rec, source: 'custom' };
   saveCustomPrompt(name, mode, text);
   rebuildDropdown(name);
   closeModal();
@@ -2691,7 +2903,7 @@ function saveNewPrompt() {
 
 function deleteCurrentPrompt() {
   const name = els.sysSelect.value;
-  if (BUILTIN_NAMES.includes(name)) return;
+  if (PROMPT_META[name]?.source !== 'custom') return;
   if (!confirm(`Delete "${name}"?`)) return;
   deleteCustomPrompt(name);
   rebuildDropdown(DEFAULT_SELECTED);
@@ -2701,42 +2913,54 @@ function deleteCurrentPrompt() {
 /* =========================================
    INIT
    ========================================= */
-function init() {
+function restoreMissingResourcePrompt() {
+  try {
+    const values = {...JSON.parse(localStorage.getItem(CONFIG.storageKey) || '{}'), ...JSON.parse(localStorage.getItem(CONFIG.storageKey + '-prefs') || '{}')};
+    if (values.sys?.startsWith('resource:') && !PROMPTS[values.sys] && values.systemPromptDraft) {
+      PROMPTS[values.sys] = values.systemPromptDraft;
+      PROMPT_META[values.sys] = {source:'missing', title:values.sys.slice(9), mode:['vision','rewrite','generate'].includes(values.systemPromptMode) ? values.systemPromptMode : 'rewrite', rec:1024};
+      document.getElementById('pe-catalog-status').textContent = 'Selected file is unavailable. Your saved editor draft is kept.';
+    }
+  } catch(e) {}
+}
+async function init() {
+  els.send.disabled = true;
+  els.sysSelect.disabled = true;
+  document.getElementById('pe-refresh-prompts').disabled = true;
   loadCustomPrompts();
+  peConnectionReady = loadPeConnection();
+  peConnectionReady.catch(e => {
+    peConnectionFeedback('Connection unavailable: ' + e.message);
+    document.getElementById('pe-connection-summary').textContent = 'Connection unavailable';
+  });
+  await Promise.all([loadResourcePrompts(true), loadLegacyPrompts()]);
+  restoreMissingResourcePrompt();
+  const catalogMessage = document.getElementById('pe-catalog-status').textContent;
   rebuildDropdown(storedPromptName());
   restoreState();
+  if (/unavailable|skipped/.test(catalogMessage)) document.getElementById('pe-catalog-status').textContent = catalogMessage;
   state.initializing = false;
-  peConnectionReady = loadPeConnection();
-  peConnectionReady.catch(e => peConnectionFeedback('Connection unavailable: ' + e.message));
-
-  // Auto-load prompts.json from same directory
-  fetchWithTimeout(`./prompts.json?ts=${Date.now()}`, { cache: "no-store" }, 5000).then(r => r.ok ? r.json() : null).then(data => {
-    if (!data?.prompts) return;
-    const currentPrompt = els.sysSelect.value;
-    const currentSettings = preferenceSnapshot();
-    for (const p of data.prompts) {
-      if (!p?.name || !p?.text) continue;
-      if (!PROMPTS[p.name]) { PROMPTS[p.name] = p.text; PROMPT_META[p.name] = { mode: 'generate', rec: 2048 }; }
-    }
-    rebuildDropdown(PROMPTS[currentPrompt] ? currentPrompt : (data.selected || DEFAULT_SELECTED));
-    applyPreferenceControls(currentSettings);
-    saveQuickPrefs();
-  }).catch(() => {});
-
   bindEvents();
   updateActionButtons();
+  els.send.disabled = false;
+  els.sysSelect.disabled = false;
 }
 
 function bindEvents() {
-  els.sysSelect.addEventListener('change', () => {
-    if (state.history.length > 0) {
-      state.history = [];
-      renderChat();
-      showToast("Prompt changed — chat cleared", "info");
-    }
-    updateSysPreview();
-    saveQuickPrefs();
+  els.sysSelect.addEventListener('change', () => choosePePrompt(els.sysSelect.value));
+  document.getElementById('pe-prompt-folder').addEventListener('change', () => {
+    document.getElementById('pe-prompt-search').value = '';
+    renderPePromptOptions();
   });
+  document.getElementById('pe-prompt-search').addEventListener('input', renderPePromptOptions);
+  document.getElementById('pe-refresh-prompts').addEventListener('click', () => loadResourcePrompts(false));
+  const settingsDialog = document.getElementById('pe-settings-dialog');
+  settingsDialog.addEventListener('cancel', e => { e.preventDefault(); closePeSettings(); });
+  settingsDialog.addEventListener('click', e => {
+    const box = settingsDialog.getBoundingClientRect();
+    if (e.target === settingsDialog && (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom)) closePeSettings();
+  });
+  els.sysPreview.addEventListener('input', saveQuickPrefs);
   els.copySysBtn.addEventListener('click', () => { peCopy(els.sysPreview.value); });
   els.input.addEventListener('input', () => { autoResize(); try { localStorage.setItem(CONFIG.storageKey + '-draft', els.input.value); } catch (e) {} });
 
@@ -2754,24 +2978,11 @@ function bindEvents() {
   });
   document.getElementById('img-max-dim').addEventListener('change', saveQuickPrefs);
 
-  // Persist LM Studio controls as soon as they change.
-  els.backend.addEventListener('change', saveQuickPrefs);
-  els.ip.addEventListener('input', saveQuickPrefs);
-  els.ip.addEventListener('blur', saveQuickPrefs);
-
-  // Context limit manual edit
-  els.ctxInput.addEventListener('change', () => {
-    const v = parseInt(els.ctxInput.value) || 4096;
-    state.maxContext = Math.max(1024, v);
-    els.ctxInput.value = state.maxContext;
-    saveState();
-    showToast(`Context set to ${state.maxContext}`);
-  });
   ['temp','topp','maxtokens','topk','presence'].forEach(id => {
     const el = document.getElementById(`rng-${id}`);
     if (el) el.addEventListener('input', () => {
       updateGenerationSettingDisplay(id, el);
-      saveQuickPrefs();
+      if (!peSettingsSnapshot) saveQuickPrefs();
     });
   });
   document.getElementById('clear-generation-settings').addEventListener('click', () => {

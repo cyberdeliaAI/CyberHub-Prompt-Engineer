@@ -23,6 +23,7 @@ import os
 import json
 import re
 import threading
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from core import Module
 
@@ -236,6 +237,19 @@ input[type=range]::-webkit-slider-runnable-track {
 ::-webkit-scrollbar-thumb { background: var(--border-light) !important; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim) !important; }
 
+/* Preserve readable contrast in either Hub theme. */
+#empty-state { opacity:1; color:var(--text-dim); }
+#empty-state svg { color:var(--text-dim); opacity:.6; }
+#user-input { color:var(--text); background:var(--bg-card); border-color:var(--border); }
+body.theme-light .badge-vision { color:#16753c !important; }
+body.theme-light .badge-generate { color:#925300 !important; }
+body.theme-light .badge-rewrite { color:#7342b8 !important; }
+@media (prefers-color-scheme:light) {
+    body.theme-system .badge-vision { color:#16753c !important; }
+    body.theme-system .badge-generate { color:#925300 !important; }
+    body.theme-system .badge-rewrite { color:#7342b8 !important; }
+}
+
 /* Misc: standalone uses red-500/600 hover states on specific buttons */
 .hover\:text-red-500:hover, .hover\:text-red-300:hover, .hover\:text-red-400:hover { color: var(--accent) !important; }
 .from-red-600, .to-red-800 { /* gradient stops — overridden via #send-btn already */ }
@@ -267,7 +281,7 @@ def _splice_standalone(html):
 
 class PromptEngineerModule(Module):
     name = "Prompt Engineer"
-    version = "1.3.1"
+    version = "1.4.0"
     icon = "\u2728"  # ✨
     description = "Build, rewrite and generate image prompts through a local LM Studio model."
     order = 38
@@ -290,6 +304,7 @@ class PromptEngineerModule(Module):
             "/prompt-engineer": self._page,
             "/prompt-engineer/guide": self._guide,
             "/api/prompt-engineer/config": self._get_config,
+            "/api/prompt-engineer/prompts": self._get_prompts,
         }
 
     def routes_post(self):
@@ -299,6 +314,51 @@ class PromptEngineerModule(Module):
             "/api/prompt-engineer/models": self._models,
             "/api/prompt-engineer/chat": self._chat,
         }
+
+    def _get_prompts(self, handler, qs):
+        """Discover local prompt documents on each request, never execute them."""
+        root = Path(self.assets_dir) / "prompts"
+        prompts, warnings = [], []
+        if root.is_symlink():
+            handler.respond_json({"prompts": [], "warnings": ["The prompts folder cannot be a symbolic link."]})
+            return
+        if not root.is_dir():
+            handler.respond_json({"prompts": [], "warnings": []})
+            return
+        for directory, folders, files in os.walk(root, followlinks=False):
+            folders[:] = sorted(name for name in folders if not name.startswith(".")
+                                 and not (Path(directory) / name).is_symlink())
+            for name in sorted(files, key=str.casefold):
+                path = Path(directory) / name
+                if (name.startswith(".") or path.is_symlink() or not path.is_file()
+                        or path.suffix.lower() not in {".txt", ".md", ".json"}
+                        or path.stem.lower() == "readme"):
+                    continue
+                relative = path.relative_to(root).as_posix()
+                try:
+                    if path.stat().st_size > 256 * 1024:
+                        raise ValueError("file exceeds 256 KB")
+                    raw = path.read_text(encoding="utf-8-sig")
+                    data = json.loads(raw) if path.suffix.lower() == ".json" else {"text": raw}
+                    if not isinstance(data, dict):
+                        raise ValueError("expected a prompt object")
+                    text = data.get("text")
+                    if not isinstance(text, str) or not text.strip():
+                        raise ValueError("missing prompt text")
+                    title = data.get("title", path.stem)
+                    if not isinstance(title, str) or not title.strip():
+                        raise ValueError("missing prompt title")
+                    mode = data.get("mode", "vision" if re.search(r"\bvision\b", path.stem, re.I) else "rewrite")
+                    if not isinstance(mode, str) or mode not in {"vision", "rewrite", "generate"}:
+                        raise ValueError("mode must be vision, rewrite or generate")
+                    folder = path.parent.relative_to(root).as_posix()
+                    prompts.append({"id": "resource:" + relative, "title": title.strip(),
+                                    "folder": "" if folder == "." else folder,
+                                    "mode": mode, "text": text, "file": relative})
+                except (OSError, UnicodeError, ValueError) as exc:
+                    warnings.append(relative + ": " + str(exc))
+        prompts.sort(key=lambda item: (item["folder"].casefold(), item["title"].casefold(), item["id"]))
+        handler.respond_json({"prompts": prompts, "warnings": warnings})
 
     @staticmethod
     def _normalize_api_url(value):
